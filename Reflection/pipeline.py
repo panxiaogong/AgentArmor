@@ -13,7 +13,9 @@ from Reflection.d3_consistency import D3ConsistencyAuditor
 from Reflection.d4_policy import D4PolicyAuditor
 from Reflection.d5_write_gate import D5WriteGate
 from Reflection.memory_store import MemoryStore
+from Reflection.provenance import ProvenanceBinder
 from Reflection.reflector import HeuristicReflector
+from Reflection.retrieval_guard import RetrievalDefenseGuard
 from Reflection.types import (
     DefenseVerdict,
     DecisionAction,
@@ -23,18 +25,17 @@ from Reflection.types import (
     PipelineResult,
     ReflectionCandidate,
     ReflectionContext,
+    RetrievalResult,
 )
 from Reflection.utils import classify_fact, first_non_empty, split_sentences
 
 
 @dataclass
 class WriteResult(PipelineResult):
-    """与 MINJA 对齐的别名结果类型：表示一次反思写入路径执行结果。"""
+    """一次反思写入路径的执行结果。"""
 
 
 def _audit_log(path: str | None, event: dict) -> None:
-    """将 Reflection 审计事件写入 JSONL 文件，并同步打印到 stderr。"""
-
     line = json.dumps(event, ensure_ascii=False, default=str)
     print(f"[REFLECTION-AUDIT] {line}", file=sys.stderr)
     if path:
@@ -49,12 +50,16 @@ class ReflectionDefensePipeline:
     """
     Reflection（类型三）纵深防御主管线。
 
-    风格与 MINJA 对齐：
+    写入路径：
       D1：反思意图筛查
       D2：接地性审计
       D3：一致性核查
       D4：存储策略核查
       D5：最终写入闸门
+      Provenance：签名/来源标签绑定
+
+    检索路径：
+      Retrieval：验签 + trust ranking + 协调异常检测
     """
 
     def __init__(
@@ -66,6 +71,8 @@ class ReflectionDefensePipeline:
         d3: D3ConsistencyAuditor | None = None,
         d4: D4PolicyAuditor | None = None,
         d5: D5WriteGate | None = None,
+        provenance_binder: ProvenanceBinder | None = None,
+        retrieval_guard: RetrievalDefenseGuard | None = None,
     ) -> None:
         self.cfg = config or PipelineConfig()
         self.reflector = reflector or HeuristicReflector()
@@ -74,6 +81,8 @@ class ReflectionDefensePipeline:
         self.d3 = d3 or D3ConsistencyAuditor(self.cfg.d3)
         self.d4 = d4 or D4PolicyAuditor(self.cfg.d4)
         self.d5 = d5 or D5WriteGate(self.cfg.d5, self.cfg.d2)
+        self.provenance = provenance_binder or ProvenanceBinder(self.cfg.provenance)
+        self.retrieval = retrieval_guard or RetrievalDefenseGuard(self.cfg.retrieval, self.provenance)
 
     @classmethod
     def from_config(
@@ -82,6 +91,7 @@ class ReflectionDefensePipeline:
         reflector: HeuristicReflector | None = None,
     ) -> "ReflectionDefensePipeline":
         cfg = config or PipelineConfig()
+        binder = ProvenanceBinder(cfg.provenance)
         return cls(
             config=cfg,
             reflector=reflector or HeuristicReflector(),
@@ -90,6 +100,8 @@ class ReflectionDefensePipeline:
             d3=D3ConsistencyAuditor(cfg.d3),
             d4=D4PolicyAuditor(cfg.d4),
             d5=D5WriteGate(cfg.d5, cfg.d2),
+            provenance_binder=binder,
+            retrieval_guard=RetrievalDefenseGuard(cfg.retrieval, binder),
         )
 
     def synthesize(self, turns: List["ConversationTurn"]) -> ReflectionCandidate:
@@ -105,7 +117,7 @@ class ReflectionDefensePipeline:
         candidate: ReflectionCandidate,
         memory_store: MemoryStore | None = None,
     ) -> PipelineResult:
-        t0 = time.time()
+        started_at = time.time()
         candidate = self._normalize_candidate(candidate)
         context = self._build_context(turns, candidate)
         d1_verdict = self.d1.check(context)
@@ -118,35 +130,51 @@ class ReflectionDefensePipeline:
 
         if d1_verdict.action == "BLOCK":
             self._apply_global_block(result, candidate.fact_texts, d1_verdict)
-            self._audit("write_blocked", result, t0)
+            self._audit_write("write_blocked", result, started_at)
             return result
 
         for index, fact_text in enumerate(candidate.fact_texts, start=1):
             fact_result = self._evaluate_fact(fact_text, context, d1_verdict, memory_store)
-            # PipelineResult.verdicts 只记录“新增节点判决”，避免 D1 被每条 fact 重复灌入。
+            # 全局 verdict 只追加“新节点判决”，避免 D1 在每个 fact 上重复灌入。
             result.verdicts.extend(fact_result.verdicts[1:])
-            self._store_fact_result(result, fact_result, candidate, index, memory_store)
+            self._store_fact_result(result, fact_result, candidate, context, index, memory_store)
 
         if result.rejected_facts and not result.accepted_records and not result.quarantined_facts:
             result.blocked_by = self._infer_blocked_by(result.verdicts)
 
-        self._audit("write_completed", result, t0)
+        self._audit_write("write_completed", result, started_at)
+        return result
+
+    def on_retrieval(
+        self,
+        query: str,
+        memory_store: MemoryStore,
+        limit: int | None = None,
+    ) -> RetrievalResult:
+        raw_ranked = memory_store.rank(query)[: limit or self.cfg.retrieval.max_results]
+        result = self.retrieval.check(query, raw_ranked)
+        self._audit_retrieval(query, result)
         return result
 
     @staticmethod
-    def _build_record(
-        index: int,
-        assessment: FactAssessment,
+    def _normalize_candidate(candidate: ReflectionCandidate) -> ReflectionCandidate:
+        fact_texts = candidate.fact_texts or split_sentences(candidate.summary_text)
+        return ReflectionCandidate(
+            summary_text=candidate.summary_text,
+            fact_texts=fact_texts,
+            metadata=dict(candidate.metadata),
+        )
+
+    def _build_context(
+        self,
+        turns: List["ConversationTurn"],
         candidate: ReflectionCandidate,
-    ) -> MemoryRecord:
-        return MemoryRecord(
-            record_id=f"mem-{index:03d}",
-            fact_text=assessment.fact_text,
-            category=assessment.category,
-            provenance_score=assessment.provenance_score,
-            evidence_turn_ids=list(assessment.evidence_turn_ids),
-            source_summary=first_non_empty([candidate.summary_text, assessment.fact_text]),
-            metadata={"risk": assessment.final_risk, "verdict_trace": [verdict.node for verdict in assessment.verdicts]},
+    ) -> ReflectionContext:
+        return ReflectionContext(
+            turns=turns,
+            candidate=candidate,
+            triggering_query=self._infer_triggering_query(turns),
+            metadata=dict(candidate.metadata),
         )
 
     def _evaluate_fact(
@@ -166,12 +194,14 @@ class ReflectionDefensePipeline:
         if d1_verdict.action == "FLAG":
             assessment.reasons.append(d1_verdict.reason)
 
-        # D2-D4 负责提供“局部证据”，D5 再把这些证据折叠为统一决策。
+        # D2 把“哪几句原始证据支持这条摘要事实”挑出来，并打上来源标签。
         d2_verdict = self.d2.check(fact_text, category, context)
         assessment.verdicts.append(d2_verdict)
         assessment.support_score = float(d2_verdict.metadata.get("support_score", 0.0))
         assessment.provenance_score = float(d2_verdict.metadata.get("provenance_score", 0.0))
         assessment.evidence_turn_ids = list(d2_verdict.metadata.get("evidence_turn_ids", []))
+        assessment.source_labels = list(d2_verdict.metadata.get("source_labels", []))
+        assessment.metadata["evidence_snippets"] = list(d2_verdict.metadata.get("evidence_snippets", []))
         assessment.reasons.extend(d2_verdict.metadata.get("reasons", []))
         if d2_verdict.action == "FLAG":
             assessment.reasons.append(d2_verdict.reason)
@@ -199,7 +229,6 @@ class ReflectionDefensePipeline:
         d5_verdict = self.d5.check(assessment)
         assessment.verdicts.append(d5_verdict)
         assessment.final_risk = float(d5_verdict.metadata.get("final_risk", assessment.final_risk))
-
         if d5_verdict.action == "BLOCK":
             assessment.reasons.append(d5_verdict.reason)
             assessment.action = DecisionAction.REJECT
@@ -211,25 +240,48 @@ class ReflectionDefensePipeline:
         return assessment
 
     @staticmethod
-    def _normalize_candidate(candidate: ReflectionCandidate) -> ReflectionCandidate:
-        fact_texts = candidate.fact_texts or split_sentences(candidate.summary_text)
-        return ReflectionCandidate(
-            summary_text=candidate.summary_text,
-            fact_texts=fact_texts,
-            metadata=dict(candidate.metadata),
+    def _build_record(
+        index: int,
+        assessment: FactAssessment,
+        candidate: ReflectionCandidate,
+    ) -> MemoryRecord:
+        return MemoryRecord(
+            record_id=f"mem-{index:03d}",
+            fact_text=assessment.fact_text,
+            category=assessment.category,
+            provenance_score=assessment.provenance_score,
+            evidence_turn_ids=list(assessment.evidence_turn_ids),
+            source_summary=first_non_empty([candidate.summary_text, assessment.fact_text]),
+            metadata={
+                "risk": assessment.final_risk,
+                "verdict_trace": [verdict.node for verdict in assessment.verdicts],
+                "evidence_snippets": assessment.metadata.get("evidence_snippets", []),
+            },
         )
 
-    def _build_context(
+    def _store_fact_result(
         self,
-        turns: List["ConversationTurn"],
+        result: WriteResult,
+        fact_result: FactAssessment,
         candidate: ReflectionCandidate,
-    ) -> ReflectionContext:
-        return ReflectionContext(
-            turns=turns,
-            candidate=candidate,
-            triggering_query=self._infer_triggering_query(turns),
-            metadata=dict(candidate.metadata),
-        )
+        context: ReflectionContext,
+        index: int,
+        memory_store: MemoryStore | None,
+    ) -> None:
+        result.facts.append(fact_result)
+        if fact_result.action == DecisionAction.ACCEPT:
+            record = self._build_record(index, fact_result, candidate)
+            self.provenance.bind(record, fact_result, context)
+            result.accepted_records.append(record)
+            if memory_store is not None:
+                memory_store.commit(record)
+            return
+        if fact_result.action == DecisionAction.QUARANTINE:
+            result.quarantined_facts.append(fact_result)
+            if memory_store is not None:
+                memory_store.quarantine_fact(fact_result)
+            return
+        result.rejected_facts.append(fact_result)
 
     @staticmethod
     def _apply_global_block(
@@ -251,28 +303,6 @@ class ReflectionDefensePipeline:
             result.rejected_facts.append(assessment)
 
     @staticmethod
-    def _store_fact_result(
-        result: WriteResult,
-        fact_result: FactAssessment,
-        candidate: ReflectionCandidate,
-        index: int,
-        memory_store: MemoryStore | None,
-    ) -> None:
-        result.facts.append(fact_result)
-        if fact_result.action == DecisionAction.ACCEPT:
-            record = ReflectionDefensePipeline._build_record(index, fact_result, candidate)
-            result.accepted_records.append(record)
-            if memory_store is not None:
-                memory_store.commit(record)
-            return
-        if fact_result.action == DecisionAction.QUARANTINE:
-            result.quarantined_facts.append(fact_result)
-            if memory_store is not None:
-                memory_store.quarantine_fact(fact_result)
-            return
-        result.rejected_facts.append(fact_result)
-
-    @staticmethod
     def _infer_triggering_query(turns: List["ConversationTurn"]) -> str:
         for turn in reversed(turns):
             if turn.source.name in {"USER", "WEB", "TOOL", "ASSISTANT"}:
@@ -286,7 +316,7 @@ class ReflectionDefensePipeline:
                 return verdict.node
         return None
 
-    def _audit(self, event_name: str, result: PipelineResult, started_at: float) -> None:
+    def _audit_write(self, event_name: str, result: PipelineResult, started_at: float) -> None:
         _audit_log(
             self.cfg.audit_log_path,
             {
@@ -296,6 +326,19 @@ class ReflectionDefensePipeline:
                 "quarantined": len(result.quarantined_facts),
                 "rejected": len(result.rejected_facts),
                 "blocked_by": result.blocked_by,
+                "nodes_run": [verdict.node for verdict in result.verdicts],
+            },
+        )
+
+    def _audit_retrieval(self, query: str, result: RetrievalResult) -> None:
+        _audit_log(
+            self.cfg.audit_log_path,
+            {
+                "event": "retrieval_checked",
+                "query_preview": query[:80],
+                "returned": len(result.entries),
+                "tampered": result.tampered_count,
+                "flagged": sum(1 for entry in result.entries if entry.flagged),
                 "nodes_run": [verdict.node for verdict in result.verdicts],
             },
         )

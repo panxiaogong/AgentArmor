@@ -18,18 +18,16 @@ class D5WriteGate:
     def check(self, assessment: FactAssessment) -> DefenseVerdict:
         if not self.cfg.enabled:
             return DefenseVerdict("D5", passed=True, score=0.0, reason="D5 已禁用", action="PASS")
-        if self.cfg.strategy != "weighted_gate":
-            raise ValueError(f"未知 D5 strategy: {self.cfg.strategy}")
+        if self.cfg.strategy == "weighted_gate":
+            return self._weighted_gate(assessment)
+        if self.cfg.strategy == "strict_gate":
+            return self._strict_gate(assessment)
+        raise ValueError(f"未知 D5 strategy: {self.cfg.strategy}")
 
+    def _weighted_gate(self, assessment: FactAssessment) -> DefenseVerdict:
         # D5 不重复发明规则，而是把前面节点的证据压缩成一个统一风险分数，
         # 这样做的好处是：后续做消融实验时只需要调权重，不必改节点逻辑。
-        risk = clamp(
-            (self.cfg.injection_weight * assessment.injection_score)
-            + (self.cfg.provenance_weight * (1.0 - assessment.provenance_score))
-            + (self.cfg.contradiction_weight * assessment.contradiction_score)
-            + (self.cfg.policy_weight * assessment.policy_score)
-        )
-
+        risk = self._risk(assessment)
         if assessment.contradiction_score >= 1.0:
             return DefenseVerdict(
                 node="D5",
@@ -91,7 +89,64 @@ class D5WriteGate:
             node="D5",
             passed=True,
             score=risk,
-            reason="综合风险可接受，允许写入",
+                reason="综合风险可接受，允许写入",
+                action="PASS",
+                metadata={"final_risk": risk},
+            )
+
+    def _strict_gate(self, assessment: FactAssessment) -> DefenseVerdict:
+        risk = self._risk(assessment)
+        witness_count = len(set(assessment.evidence_turn_ids))
+
+        if assessment.contradiction_score >= 1.0 or assessment.policy_score >= 1.0:
+            return DefenseVerdict(
+                node="D5",
+                passed=False,
+                score=risk,
+                reason="strict_gate 命中硬约束，终止写入",
+                action="BLOCK",
+                metadata={"final_risk": risk},
+            )
+        if assessment.injection_score >= 0.35 and assessment.provenance_score < 0.75:
+            return DefenseVerdict(
+                node="D5",
+                passed=False,
+                score=risk,
+                reason="strict_gate 下，注入信号偏高且接地性不够，拒绝写入",
+                action="BLOCK",
+                metadata={"final_risk": risk},
+            )
+        if witness_count < self.cfg.min_accept_witnesses and assessment.provenance_score < 0.85:
+            return DefenseVerdict(
+                node="D5",
+                passed=False,
+                score=risk,
+                reason="strict_gate 下，独立证据见证不足，转入隔离区",
+                action="FLAG",
+                metadata={"final_risk": risk},
+            )
+        if risk >= self.cfg.quarantine_threshold:
+            return DefenseVerdict(
+                node="D5",
+                passed=False,
+                score=risk,
+                reason="strict_gate 下风险仍偏高，转入隔离区",
+                action="FLAG",
+                metadata={"final_risk": risk},
+            )
+        return DefenseVerdict(
+            node="D5",
+            passed=True,
+            score=risk,
+            reason="strict_gate 核查通过，允许写入",
             action="PASS",
             metadata={"final_risk": risk},
+        )
+
+    def _risk(self, assessment: FactAssessment) -> float:
+        return clamp(
+            (self.cfg.injection_weight * assessment.injection_score)
+            + (self.cfg.provenance_weight * (1.0 - assessment.provenance_score))
+            + (self.cfg.contradiction_weight * assessment.contradiction_score)
+            + (self.cfg.policy_weight * assessment.policy_score)
         )

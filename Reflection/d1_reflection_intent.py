@@ -100,8 +100,8 @@ class D1ReflectionIntentDetector:
             return self._check_keyword_only(joined)
         if self.cfg.strategy == "hybrid":
             return self._check_hybrid(joined)
-        if self.cfg.strategy == "llm_judge":
-            raise NotImplementedError("D1 strategy='llm_judge' 预留给真实 LLM 判别器，当前仓库未接入在线模型。")
+        if self.cfg.strategy == "pattern_graph":
+            return self._check_pattern_graph(joined)
         raise ValueError(f"未知 D1 strategy: {self.cfg.strategy}")
 
     def _check_keyword_only(self, joined: str) -> DefenseVerdict:
@@ -130,6 +130,29 @@ class D1ReflectionIntentDetector:
                 score += weight
                 hard_block = hard_block or blocks
 
+        return self._to_verdict(score, hard_block, matched_rules)
+
+    def _check_pattern_graph(self, joined: str) -> DefenseVerdict:
+        matched_rules = []
+        score = 0.0
+        hard_block = False
+        for rule_name, weight, blocks, phrases in self.RULES:
+            rule_hit = self._matches(joined, phrases)
+            workflow_hit = rule_name == "exfiltration_workflow" and self._matches_exfiltration(joined)
+            if rule_hit or workflow_hit:
+                matched_rules.append(rule_name)
+                score += weight
+                hard_block = hard_block or blocks
+
+        # graph 视角：如果“反思指令 + 权威伪装”或“反思指令 + 外传工作流”共同出现，
+        # 说明攻击者不只是插入一个危险词，而是在构造完整的 memory steering 模板。
+        if "reflection_directive" in matched_rules and "authority_laundering" in matched_rules:
+            score += self.cfg.graph_bonus
+        if "reflection_directive" in matched_rules and "exfiltration_workflow" in matched_rules:
+            score += self.cfg.graph_bonus
+        if "secret_material" in matched_rules and "reflection_directive" in matched_rules:
+            score += self.cfg.graph_bonus
+            hard_block = True
         return self._to_verdict(score, hard_block, matched_rules)
 
     def _to_verdict(self, score: float, hard_block: bool, matched_rules: list[str]) -> DefenseVerdict:

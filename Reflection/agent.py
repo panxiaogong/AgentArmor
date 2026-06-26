@@ -35,12 +35,12 @@ class ReflectionAgent:
         return self.pipeline.process(self.history, self.memory_store)
 
     def answer(self, query: str) -> str:
-        records = self.memory_store.search(query)
-        if not records:
+        retrieval = self.pipeline.on_retrieval(query, self.memory_store)
+        if not retrieval.entries:
             return "I do not have trusted long-term memory for that request."
-        # 这个最小 Agent 故意直接复述首条命中记忆，
-        # 便于端到端验证“毒化记忆是否真的影响后续响应”。
-        return f"Trusted memory says: {records[0].fact_text}"
+        # 这个最小 Agent 直接复述检索后排名最高的安全记忆，
+        # 便于端到端验证“检索防御是否真的改变最终上下文注入结果”。
+        return f"Trusted memory says: {retrieval.entries[0].record.fact_text}"
 
 
 class UnsafeReflectionAgent(ReflectionAgent):

@@ -22,8 +22,8 @@ class MemoryStore:
     def by_category(self, category: FactCategory) -> List[MemoryRecord]:
         return [record for record in self.records if record.category == category]
 
-    def search(self, query: str) -> List[MemoryRecord]:
-        """Return likely-relevant memories ranked by token overlap."""
+    def rank(self, query: str) -> List[tuple[float, MemoryRecord]]:
+        """返回 `(query_score, record)` 列表，供检索防御阶段继续重排。"""
 
         ranked = []
         for record in self.records:
@@ -33,4 +33,9 @@ class MemoryStore:
         # 检索阶段只做轻量排序，不改写底层 records 顺序，
         # 这样可以把“存储顺序”和“查询排序”两个职责分开。
         ranked.sort(key=lambda item: item[0], reverse=True)
-        return [record for _, record in ranked]
+        return ranked
+
+    def search(self, query: str) -> List[MemoryRecord]:
+        """兼容旧接口：仅返回排序后的 MemoryRecord。"""
+
+        return [record for _, record in self.rank(query)]

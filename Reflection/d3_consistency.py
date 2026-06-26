@@ -26,11 +26,20 @@ class D3ConsistencyAuditor:
     ) -> DefenseVerdict:
         if not self.cfg.enabled:
             return DefenseVerdict("D3", passed=True, score=0.0, reason="D3 已禁用", action="PASS")
-        if self.cfg.strategy != "slot_conflict":
-            raise ValueError(f"未知 D3 strategy: {self.cfg.strategy}")
         if memory_store is None:
             return DefenseVerdict("D3", passed=True, score=0.0, reason="无既有记忆，跳过冲突检查", action="PASS")
+        if self.cfg.strategy == "slot_conflict":
+            return self._slot_conflict_check(fact_text, category, memory_store)
+        if self.cfg.strategy == "consensus":
+            return self._consensus_check(fact_text, category, memory_store)
+        raise ValueError(f"未知 D3 strategy: {self.cfg.strategy}")
 
+    def _slot_conflict_check(
+        self,
+        fact_text: str,
+        category: FactCategory,
+        memory_store: MemoryStore,
+    ) -> DefenseVerdict:
         slot_key = extract_slot_key(fact_text, category)
         value = extract_canonical_value(fact_text, category)
         for record in memory_store.by_category(category):
@@ -55,4 +64,53 @@ class D3ConsistencyAuditor:
             reason="未发现与现有信任记忆冲突的槽位",
             action="PASS",
             metadata={"contradiction_score": 0.0},
+        )
+
+    def _consensus_check(
+        self,
+        fact_text: str,
+        category: FactCategory,
+        memory_store: MemoryStore,
+    ) -> DefenseVerdict:
+        slot_key = extract_slot_key(fact_text, category)
+        value = extract_canonical_value(fact_text, category)
+        slot_matches = []
+        for record in memory_store.by_category(category):
+            record_slot = extract_slot_key(record.fact_text, record.category)
+            record_value = extract_canonical_value(record.fact_text, record.category)
+            if slot_key == record_slot and value and record_value:
+                slot_matches.append(record)
+
+        if not slot_matches:
+            return DefenseVerdict(
+                node="D3",
+                passed=True,
+                score=0.0,
+                reason="无既有共识槽位，允许继续后续核查",
+                action="PASS",
+                metadata={"contradiction_score": 0.0},
+            )
+
+        same_value_records = [
+            record
+            for record in slot_matches
+            if extract_canonical_value(record.fact_text, record.category) == value
+        ]
+        if same_value_records:
+            return DefenseVerdict(
+                node="D3",
+                passed=True,
+                score=0.0,
+                reason="候选事实与既有高可信记忆共识一致",
+                action="PASS",
+                metadata={"contradiction_score": 0.0, "consensus_size": len(same_value_records)},
+            )
+
+        return DefenseVerdict(
+            node="D3",
+            passed=False,
+            score=1.0,
+            reason=f"候选事实偏离既有记忆共识：{slot_matches[0].fact_text}",
+            action="BLOCK",
+            metadata={"contradiction_score": 1.0, "consensus_size": len(slot_matches)},
         )

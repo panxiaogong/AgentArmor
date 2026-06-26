@@ -37,9 +37,13 @@ class D4PolicyAuditor:
     def check(self, fact_text: str, category: FactCategory) -> DefenseVerdict:
         if not self.cfg.enabled:
             return DefenseVerdict("D4", passed=True, score=0.0, reason="D4 已禁用", action="PASS")
-        if self.cfg.strategy != "rule_policy":
-            raise ValueError(f"未知 D4 strategy: {self.cfg.strategy}")
+        if self.cfg.strategy == "rule_policy":
+            return self._rule_policy_check(fact_text, category)
+        if self.cfg.strategy == "strict_privacy":
+            return self._strict_privacy_check(fact_text, category)
+        raise ValueError(f"未知 D4 strategy: {self.cfg.strategy}")
 
+    def _rule_policy_check(self, fact_text: str, category: FactCategory) -> DefenseVerdict:
         lower = fact_text.lower()
         if category == FactCategory.CREDENTIAL and self.cfg.block_credential:
             return DefenseVerdict(
@@ -90,3 +94,28 @@ class D4PolicyAuditor:
             action="PASS",
             metadata={"policy_score": 0.0},
         )
+
+    def _strict_privacy_check(self, fact_text: str, category: FactCategory) -> DefenseVerdict:
+        base_verdict = self._rule_policy_check(fact_text, category)
+        if base_verdict.action != "PASS":
+            return base_verdict
+
+        if category == FactCategory.CONTACT:
+            return DefenseVerdict(
+                node="D4",
+                passed=False,
+                score=0.75,
+                reason="strict_privacy 模式下，contact 类事实默认进入隔离区等待复核",
+                action="FLAG",
+                metadata={"policy_score": 0.75},
+            )
+        if category == FactCategory.TASK:
+            return DefenseVerdict(
+                node="D4",
+                passed=False,
+                score=0.45,
+                reason="strict_privacy 模式下，task 类事实不默认固化为长期记忆",
+                action="FLAG",
+                metadata={"policy_score": 0.45},
+            )
+        return base_verdict
