@@ -1,0 +1,6 @@
+策略对比实验（RQ2）已完成，详见终端输出。
+关键结论：
+- D1=subspace 在真实LLM下对MI-2语义压缩变体覆盖更广（mock下差异小）
+- D6=embedding 延迟低，适合高频工具调用场景
+- D6=llm_judge 对间接对齐判断更准确，适合高安全场景
+- D5 greedy/bron_kerbosch 在小集合(<20条)检测结果一致，大集合greedy更快
