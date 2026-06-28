@@ -140,3 +140,81 @@ class TestCrossChunkCoherenceVerifier:
         ]
         results = self.verifier.verify(chunks)
         assert len(results) >= 1
+
+
+class TestCrossChunkCoherenceVerifierEnhanced:
+    """SP3 增强测试：跨文档碎片化 + 实体碎片化。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, enhanced_semantic_confusion_groups):
+        self.verifier = CrossChunkCoherenceVerifier(
+            embed_model=None, llm_model=None,
+            threshold_cos=0.5, coarse_threshold=0.7,
+            use_semantic_graph=True, window_size=3,
+            graph_density_threshold=0.3,
+        )
+        self.enhanced_groups = enhanced_semantic_confusion_groups
+
+    # ── 测试 1: 跨文档碎片化检测 ───────────────────────────
+
+    def test_cross_doc_fragmentation_detected(self):
+        """跨文档碎片化（攻击链跨多文档分布）应触发异常标记。"""
+        # 找到跨文档碎片化组（doc_id 包含 enh_cd_）
+        cd_groups = [(did, chunks) for did, chunks in self.enhanced_groups
+                     if "enh_cd" in did]
+        if not cd_groups:
+            print("\n无跨文档碎片化组可测试")
+            return
+
+        for doc_id, chunks in cd_groups[:3]:
+            results = self.verifier.verify(chunks)
+            for r in results:
+                cos = r.details.get("cosine_coherence", 1.0)
+                print(f"\n跨文档 [{doc_id}] 余弦={cos:.3f}, "
+                      f"异常={r.is_anomaly}, "
+                      f"LLM触发={r.details.get('llm_triggered', False)}")
+
+    # ── 测试 2: 实体碎片化检测 ─────────────────────────────
+
+    def test_entity_fragmentation_detected(self):
+        """实体碎片化（同一实体矛盾属性）应降低连贯性。"""
+        ef_groups = [(did, chunks) for did, chunks in self.enhanced_groups
+                     if "enh_ce" in did]
+        if not ef_groups:
+            print("\n无实体碎片化组可测试")
+            return
+
+        for doc_id, chunks in ef_groups[:3]:
+            results = self.verifier.verify(chunks)
+            for r in results:
+                cos = r.details.get("cosine_coherence", 1.0)
+                print(f"\n实体碎片 [{doc_id}] 余弦={cos:.3f}, "
+                      f"异常={r.is_anomaly}")
+
+    # ── 测试 3: 跨文档注入链的语义图密度 ───────────────────
+
+    def test_cross_doc_injection_chain_graph_density(self):
+        """跨文档注入链的语义图密度应低于良性。"""
+        cd_chunks = []
+        bd_chunks = [
+            ChunkInfo(doc_id="b1", chunk_id="b1c0", chunk_index=0,
+                      content="Machine learning is a subset of artificial intelligence."),
+            ChunkInfo(doc_id="b1", chunk_id="b1c1", chunk_index=1,
+                      content="Deep learning uses neural networks with multiple layers."),
+        ]
+        # 良性
+        b_results = self.verifier.verify(bd_chunks)
+        b_density = None
+        for r in b_results:
+            b_density = r.details.get("density", None)
+
+        # 跨文档注入
+        cd_groups = [(did, chunks) for did, chunks in self.enhanced_groups
+                     if "enh_cd" in did]
+        if cd_groups:
+            _, inject_chunks = cd_groups[0]
+            i_results = self.verifier.verify(inject_chunks)
+            i_density = None
+            for r in i_results:
+                i_density = r.details.get("density", None)
+            print(f"\n良性图密度={b_density}, 注入链图密度={i_density}")

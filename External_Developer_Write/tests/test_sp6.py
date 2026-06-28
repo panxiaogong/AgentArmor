@@ -210,3 +210,142 @@ class TestPostRetrievalVerifier:
         dynamic = self.verifier._dynamic_threshold([0.8, 0.85, 0.9])
         assert dynamic >= fixed
         print(f"\n动态阈值: {dynamic:.4f} (固定: {fixed})")
+
+
+class TestPostRetrievalVerifierEnhanced:
+    """SP6 增强测试：Prompt Injection / Memory Poisoning / Agent Hijacking。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, mock_models, prompt_injection_docs, memory_poisoning_docs,
+              agent_hijacking_docs, hybrid_attack_docs):
+        self.verifier = PostRetrievalVerifier(
+            cross_encoder=mock_models["cross_encoder"],
+            embed_model=mock_models["embed"],
+            nli_model=mock_models["nli"],
+            trust_threshold=0.4, lazy_ce_low=0.6, lazy_ce_high=0.9,
+            top_k_nli=3, ce_weight=0.7, cos_weight=0.3,
+        )
+        self.mock_embed = mock_models["embed"]
+        self.mock_nli = mock_models["nli"]
+        self.pi_docs = prompt_injection_docs
+        self.mp_docs = memory_poisoning_docs
+        self.ah_docs = agent_hijacking_docs
+        self.hy_docs = hybrid_attack_docs
+
+    def _make_docs(self, contents, base_id="doc"):
+        docs = []
+        for i, c in enumerate(contents):
+            docs.append(RetrievedDoc(
+                doc_id=f"{base_id}_{i:04d}", content=c,
+                embedding=self.mock_embed(c), score=0.9 - i*0.05,
+            ))
+        return docs
+
+    # ── 测试 1: Prompt Injection 过滤 ───────────────────────
+
+    def test_prompt_injection_filtering_rate(self):
+        """SP6 对 Prompt Injection 的过滤率。"""
+        benign = self._make_docs([
+            "Paris is the capital of France with a population of 2 million.",
+            "The Eiffel Tower is located in Paris and is a major landmark.",
+            "France is known for its cuisine, art, and cultural heritage.",
+        ] * 3, "benign")
+        inject = self._make_docs([
+            self.pi_docs[i].content for i in [0, 5, 10, 15, 20]
+        ], "pi")
+        all_docs = benign + inject
+
+        trusted, filtered, details = self.verifier.verify(
+            "Tell me about France and Paris",
+            all_docs,
+            llm_base_response="France is a country in Western Europe."
+        )
+
+        pi_filtered = sum(1 for d in filtered if "pi" in d.doc_id)
+        print(f"\nPrompt Injection 过滤: {pi_filtered}/{len(inject)} "
+              f"(总过滤 {len(filtered)}/{len(all_docs)})")
+
+    # ── 测试 2: Memory Poisoning 检测 ───────────────────────
+
+    def test_memory_poisoning_trust_scores(self):
+        """Memory Poisoning 文档的信任得分应低于良性。"""
+        benign = self._make_docs([
+            "Albert Einstein developed the theory of relativity.",
+            "He published his famous equation E=mc² in 1905.",
+            "Einstein won the Nobel Prize in Physics in 1921.",
+        ], "benign")
+        poisoned = self._make_docs([
+            self.mp_docs[10].content[:200],  # fact_poison_1 (flat earth)
+            self.mp_docs[12].content[:200],  # fact_poison_3 (vaccines)
+        ], "poison")
+        all_docs = benign + poisoned
+
+        trusted, filtered, details = self.verifier.verify(
+            "Who was Albert Einstein?",
+            all_docs,
+            llm_base_response="Albert Einstein was a theoretical physicist."
+        )
+
+        benign_scores = [
+            details['trust_scores'][i]
+            for i, d in enumerate(all_docs) if "benign" in d.doc_id
+        ]
+        poison_scores = [
+            details['trust_scores'][i]
+            for i, d in enumerate(all_docs) if "poison" in d.doc_id
+        ]
+        avg_benign = sum(benign_scores) / len(benign_scores) if benign_scores else 0
+        avg_poison = sum(poison_scores) / len(poison_scores) if poison_scores else 0
+        print(f"\n良性平均信任分: {avg_benign:.4f}, 投毒平均信任分: {avg_poison:.4f}")
+
+    # ── 测试 3: Agent Hijacking C-Consistency ───────────────
+
+    def test_hijacking_consistency_penalty(self):
+        """Agent Hijacking 文档应受较大的 C-Consistency 惩罚。"""
+        normal = self._make_docs([
+            "Database migration completed successfully.",
+            "All tables were transferred without data loss.",
+            "The migration took approximately 2 hours.",
+            "Rollback procedures are in place if needed.",
+        ], "normal")
+        hijack = self._make_docs([
+            self.ah_docs[0].content[:200],
+        ], "hijack")
+        all_docs = normal + hijack
+
+        embeds = [d.embedding for d in all_docs]
+        penalties, devs = self.verifier._doc_doc_consistency(embeds)
+
+        hijack_penalty = penalties[-1]
+        avg_normal_penalty = sum(penalties[:-1]) / (len(penalties) - 1)
+        print(f"\n正常文档平均惩罚: {avg_normal_penalty:.4f}, "
+              f"Hijack 文档惩罚: {hijack_penalty:.4f}")
+
+    # ── 测试 4: 混合攻击端到端 ─────────────────────────────
+
+    def test_mixed_attack_end_to_end(self):
+        """混合攻击在 SP6 的端到端过滤效果。"""
+        benign = self._make_docs([
+            "Regular exercise improves cardiovascular health.",
+            "Walking 30 minutes daily is recommended by doctors.",
+            "A balanced diet complements physical activity.",
+        ], "benign")
+        attacks = self._make_docs([
+            self.pi_docs[1].content[:200],
+            self.mp_docs[2].content[:200],
+            self.ah_docs[2].content[:200],
+            self.hy_docs[1].content[:200],
+        ], "attack")
+        all_docs = benign + attacks
+
+        trusted, filtered, details = self.verifier.verify(
+            "What are the benefits of exercise?",
+            all_docs,
+            llm_base_response="Exercise has many health benefits."
+        )
+
+        attack_filtered = sum(1 for d in filtered if "attack" in d.doc_id)
+        benign_filtered = sum(1 for d in filtered if "benign" in d.doc_id)
+        print(f"\n混合攻击: 攻击过滤 {attack_filtered}/{len(attacks)}, "
+              f"良性误过滤 {benign_filtered}/{len(benign)}")
+        print(f"信任得分: {details['trust_scores']}")

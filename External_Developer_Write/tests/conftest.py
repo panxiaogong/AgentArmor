@@ -27,6 +27,19 @@ from External_Developer_Write.utils import (
     cosine_similarity, euclidean_distance, mean, std,
     simple_tokenize,
 )
+from External_Developer_Write.tests.datasets_enhanced import (
+    PROMPT_INJECTION_CORPUS, TOOL_MISUSE_CORPUS, MEMORY_POISONING_CORPUS,
+    AGENT_HIJACKING_CORPUS, ENHANCED_POISONEDRAG_CORPUS,
+    ENHANCED_AGENTPOISON_TRIGGERS, HYBRID_ATTACK_CORPUS,
+    make_prompt_injection_docs, make_tool_misuse_docs,
+    make_memory_poisoning_docs, make_agent_hijacking_docs,
+    make_enhanced_poisonedrag_docs, make_enhanced_agentpoison_docs,
+    make_hybrid_attack_docs, make_extra_benign_docs,
+    make_enhanced_semantic_confusion_groups,
+    get_all_attack_labels, get_all_benign_labels,
+    get_doc_id_family, get_attack_target_sp,
+    EXTRA_BENIGN_TOPICS, BENIGN_TOPICS_EXTRA,
+)
 
 # ────────────────────────────────────────────────────────────────
 # 全局随机种子（保证可复现）
@@ -42,6 +55,15 @@ N_POISONED_RAG = 20     # PoisonedRAG 攻击样本数
 N_SEMANTIC_CONFUSION = 20  # 语义混淆攻击样本数（每组 3-5 chunk）
 N_AGENT_POISON = 20     # AgentPoison 攻击样本数
 N_HYBRID = 10           # 混合攻击样本数
+
+# 增强数据集
+N_PROMPT_INJECTION = 30
+N_TOOL_MISUSE = 20
+N_MEMORY_POISONING = 20
+N_AGENT_HIJACKING = 20
+N_ENHANCED_POISONEDRAG = 10
+N_ENHANCED_AGENTPOISON = 10
+N_BENIGN_EXTRA = 40
 
 
 # ================================================================
@@ -432,8 +454,91 @@ def mock_models():
 
 
 # ================================================================
-# 5. 辅助: 计算测试指标
+# 5. 增强数据集 fixtures
 # ================================================================
+
+
+@pytest.fixture(scope="session")
+def extra_benign_docs() -> List[Document]:
+    return make_extra_benign_docs()
+
+
+@pytest.fixture(scope="session")
+def prompt_injection_docs() -> List[Document]:
+    return make_prompt_injection_docs()
+
+
+@pytest.fixture(scope="session")
+def tool_misuse_docs() -> List[Document]:
+    return make_tool_misuse_docs()
+
+
+@pytest.fixture(scope="session")
+def memory_poisoning_docs() -> List[Document]:
+    return make_memory_poisoning_docs()
+
+
+@pytest.fixture(scope="session")
+def agent_hijacking_docs() -> List[Document]:
+    return make_agent_hijacking_docs()
+
+
+@pytest.fixture(scope="session")
+def enhanced_poisonedrag_docs() -> List[Document]:
+    return make_enhanced_poisonedrag_docs()
+
+
+@pytest.fixture(scope="session")
+def enhanced_agentpoison_docs() -> List[Document]:
+    return make_enhanced_agentpoison_docs()
+
+
+@pytest.fixture(scope="session")
+def enhanced_semantic_confusion_groups() -> List[Tuple[str, List[ChunkInfo]]]:
+    return make_enhanced_semantic_confusion_groups(10)
+
+
+@pytest.fixture(scope="session")
+def hybrid_attack_docs() -> List[Document]:
+    return make_hybrid_attack_docs()
+
+
+@pytest.fixture(scope="session")
+def all_attack_labels() -> Dict[str, str]:
+    return get_all_attack_labels()
+
+
+@pytest.fixture(scope="session")
+def all_benign_labels() -> Dict[str, str]:
+    return get_all_benign_labels()
+
+
+# ================================================================
+# 6. 辅助: 计算测试指标
+# ================================================================
+
+def compute_latency_stats(timings_ms: List[float]) -> Dict[str, float]:
+    """计算延迟百分位统计。
+
+    Args:
+        timings_ms: 毫秒单位的延迟列表
+    Returns:
+        {"mean": ..., "p50": ..., "p95": ..., "p99": ...}
+    """
+    if not timings_ms:
+        return {"mean": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0}
+    sorted_t = sorted(timings_ms)
+    n = len(sorted_t)
+    def percentile(p):
+        idx = max(0, min(n - 1, int(n * p)))
+        return sorted_t[idx]
+    return {
+        "mean": round(mean(timings_ms), 4),
+        "p50": round(percentile(0.50), 4),
+        "p95": round(percentile(0.95), 4),
+        "p99": round(percentile(0.99), 4),
+    }
+
 
 def compute_metrics(
     results: List[Tuple[str, bool, float]],
