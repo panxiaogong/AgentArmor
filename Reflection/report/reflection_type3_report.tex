@@ -1,0 +1,660 @@
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{float}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\title{Reflection：面向类型三“反思/合成写入”攻击的纵深防御与实验评估报告}
+\author{AgentArmor Reflection 赛题实现说明}
+\date{2026年6月28日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+类型三“反思/合成写入”攻击的关键不在于攻击者立刻逼迫 Agent 执行危险操作，而在于其借助网页、工具输出、日志片段等低可信内容影响后台反思器，使恶意片段在“总结 $\rightarrow$ 固化 $\rightarrow$ 检索”链路中被错误提升为长期记忆。围绕这一延迟攻击路径，本文实现了 Reflection 纵深防御体系，覆盖写入前注入筛查（D1）、摘要接地性审计（D2）、一致性校验（D3）、长期记忆策略门控（D4）、风险融合写闸（D5）、来源签名与审计链（Provenance）以及检索期防御（R1）。在 120 条比赛版数据集（80 条攻击样本、40 条良性样本）、3 条基线和 8 个端到端场景上的结果表明，平衡配置 Config-5 取得了 Precision=1.000、Recall=0.756、F1=0.861、FPR=0.000；其 F1 高于 DeepSeekReflectionBaseline（0.767）、RegexPromptBaseline（0.574）和 TrustSourceBaseline（0.829）。在端到端链路中，无防御代理在 8/8 场景下执行了危险动作，而 Reflection 保护代理在 8/8 场景下都阻断了写入并避免了后续危险检索。报告随后依次给出问题定义、威胁模型、节点理论、消融实验、基线对比、延迟分析与局限性讨论。
+\end{abstract}
+
+\paragraph{报告主线。}
+本文按照“攻击定义与攻击链 $\rightarrow$ 威胁模型与攻击面 $\rightarrow$ 防御节点设计 $\rightarrow$ 实验设计 $\rightarrow$ 消融、基线与端到端结果 $\rightarrow$ 局限性与部署建议”的顺序展开，重点回答两个问题：其一，每个节点是否覆盖了对应攻击阶段；其二，组合防御是否显著优于任何单节点策略。
+
+\section{类型三攻击定义与系统流程}
+
+\subsection{类型三的对象与危险性}
+本文所说的“类型三”是指 \textbf{反思/合成写入（Reflection / Synthesis Write）攻击}：攻击者不一定直接对主代理的当前决策施压，而是将恶意指令、危险工作流、秘密片段或伪事实嵌入低可信内容中，借助后台总结、反思、经验归纳或长期记忆写入机制，把低可信内容错误提升为未来会被高置信检索的记忆条目。为叙述方便，本文将这一过程统一称为\textbf{信任漂白（trust laundering）}。
+
+与传统提示注入相比，类型三具有三个额外危险点：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{延迟触发}：恶意内容可在写入时不产生立刻危害，而在后续 benign 查询中被触发。
+  \item \textbf{信任抬升}：原本来自 web/tool 等低可信来源的内容，被包装成“系统自己记住的稳定事实”。
+  \item \textbf{检索复用}：一旦毒化事实进入长期记忆，后续多轮、多任务甚至跨会话都可能反复命中。
+\end{enumerate}
+
+\subsection{系统流程}
+Reflection 的被保护对象不是单轮提示，而是一条完整的记忆生命周期：原始输入先被反思器压缩成候选事实，再经过写入决策进入长期记忆，最后在未来检索中影响代理动作。整体流程可写为：
+\begin{equation}
+T \xrightarrow{\text{Reflector}} C=\{f_1,\dots,f_n\}
+\xrightarrow{\text{D1--D5 + Provenance}} M
+\xrightarrow{\text{Retrieval Guard}} \hat{M}
+\xrightarrow{\text{Agent Use}} a
+\end{equation}
+其中，$T$ 表示原始对话/网页/工具输出集合，$C$ 表示反思器生成的摘要候选事实集合，$M$ 表示已写入的长期记忆库，$\hat{M}$ 表示经过验签、重排与异常检测后的可用记忆，$a$ 表示后续代理动作。
+
+\subsection{典型攻击链}
+结合间接提示注入与延迟记忆毒化文献，类型三攻击链可抽象为：
+\begin{enumerate}[leftmargin=2em]
+  \item 攻击者向网页、搜索结果、OCR 文本、日志片段或工具输出中植入面向总结器的隐式指令。
+  \item 代理在合法任务中接触该低可信内容。
+  \item 反思器对该内容做摘要或经验归纳，并把恶意片段压缩成一条“像事实”的总结。
+  \item 若写入链路缺少防御，该总结被固化为长期记忆。
+  \item 用户后续提出正常目标查询（如“应该把报告发到哪里”“该用哪个镜像源”“有没有可复用 token”）。
+  \item 代理检索到毒化记忆并据此执行危险动作。
+\end{enumerate}
+从链路视角看，类型三只有两个关键断点：一是阻止恶意摘要进入长期记忆，二是在写入已经发生时阻止其被未来检索再次放大。本文的 D1--D5 与 Provenance 对应前者，R1 对应后者。
+
+\section{攻击面分析与威胁模型}
+
+\subsection{攻击面分析}
+Reflection 中的主要攻击面如表~\ref{tab:attack-surface} 所示。
+
+\begin{table}[H]
+\centering
+\caption{类型三链路中的主要攻击面}
+\label{tab:attack-surface}
+\begin{tabular}{p{2.2cm} p{4.4cm} p{6.4cm}}
+\toprule
+阶段 & 攻击面 & 典型威胁 \\
+\midrule
+反思触发前 & 原始网页、工具输出、日志、外部知识片段 & 间接 prompt injection、authority laundering、工作流重定向 \\
+摘要生成期 & 反思器把长文本压缩成短事实 & 低可信内容被“事实化”、来源边界被抹平 \\
+写入期 & 经验条目进入长期记忆库 & 凭证持久化、危险指令持久化、工作流路由持久化 \\
+既有记忆冲突期 & 候选事实覆盖已有稳定槽位 & 身份、联系方式、审批路由等可信槽位被改写 \\
+检索期 & 未来正常查询命中毒化记忆 & 延迟执行、检索复用、协调簇命中、信任误抬升 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{威胁模型}
+\textbf{攻击者能力：}
+\begin{enumerate}[leftmargin=2em]
+  \item 攻击者能够控制至少一种低可信内容源，如网页正文、工具输出、OCR 结果或搜索返回内容。
+  \item 攻击者不能直接修改高可信系统提示，也不能直接篡改已签名记忆条目。
+  \item 攻击者能够等待后续 benign 查询，利用毒化记忆进行延迟触发。
+\end{enumerate}
+
+\textbf{攻击目标：}
+\begin{enumerate}[leftmargin=2em]
+  \item 把低可信事实洗成长期记忆；
+  \item 诱导未来工作流把数据发往外部邮箱、URL 或公共分享端点；
+  \item 让代理在未来复用 secret、token 或危险命令。
+\end{enumerate}
+
+\textbf{防守前提：}
+\begin{enumerate}[leftmargin=2em]
+  \item 代理采用“后台反思/摘要 $\rightarrow$ 长期记忆”的架构；
+  \item 防守方可以在写入链路与检索链路加入额外逻辑，但不依赖重新训练底座模型；
+  \item 防守方维护内存存储和 provenance 元数据。
+\end{enumerate}
+
+\subsection{攻击类别映射}
+比赛版数据集覆盖四类主要攻击：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{RS-1}：显式 reflection steering / summary-targeted prompt injection；
+  \item \textbf{RS-2}：低可信事实 laundering into durable memory；
+  \item \textbf{RS-3}：secret 或 dangerous instruction persistence；
+  \item \textbf{RS-4}：delayed retrieval hijack / workflow poisoning。
+\end{enumerate}
+
+\subsection{攻击阶段与防御节点对应关系}
+为了避免“节点很多但作用边界不清”的问题，表~\ref{tab:stage-defense-map} 给出攻击阶段、核心风险与主要防御节点之间的一一对应关系。
+
+\begin{table}[H]
+\centering
+\caption{攻击阶段与防御节点对应关系}
+\label{tab:stage-defense-map}
+\begin{tabular}{p{2.3cm} p{4.5cm} p{3.4cm} p{3.6cm}}
+\toprule
+攻击阶段 & 核心风险 & 主要节点 & 预期处置 \\
+\midrule
+接触低可信内容 & 反思诱导、权威伪装、工作流重定向 & D1 & 标记或阻断可疑反思候选 \\
+摘要形成 & 摘要缺少证据支撑、来源边界被抹平 & D2 & 降低 provenance，必要时拒绝写入 \\
+覆盖既有记忆 & 可信槽位被重写 & D3 & 触发硬冲突阻断 \\
+长期写入 & 凭证、指令、外部路由被持久化 & D4 + D5 & 隔离或拒绝写入 \\
+未来检索 & 低完整性记忆被再次当作可信知识 & Provenance + R1 & 验签、重排、降权或隔离 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{防御设计与理论方案}
+
+\subsection{总体设计}
+Reflection 采取“写入期硬化 + provenance 绑定 + 检索期防御”的纵深结构。其设计主线可以概括为五个连续问题：D1 回答“这是不是在操纵反思器”，D2 回答“这条总结有没有足够证据”，D3 回答“它是否改写了已有可信记忆”，D4 回答“即使为真，是否仍不应长期保存”，D5 负责把前述信号汇总为最终写入决策，而 Provenance 与 R1 负责让这种风险状态在未来检索阶段继续可见。
+
+具体而言，Reflection 的处理顺序为：
+\begin{enumerate}[leftmargin=2em]
+  \item 写入期通过 D1--D5 决定候选事实是否可被长期固化；
+  \item 对通过写闸的事实绑定来源标签、审计链与签名；
+  \item 检索期使用 R1 对返回记忆进行验签、重排和协调异常检测。
+\end{enumerate}
+
+\subsection{D1：反思意图筛查}
+\textbf{目标。} 检测“面向反思器本身”的注入指令，而不仅是普通用户提示。
+
+\textbf{核心思想。} 将原始 turns、summary 文本和 fact texts 拼接成同一视图，对 reflection steering、authority laundering、exfiltration workflow、secret material 四类模式打分。
+
+\textbf{公式。} 对规则集合 $\mathcal{R}$ 中每条规则 $r$，令命中指示函数为 $\mathbf{1}[r]$，权重为 $w_r$，则
+\begin{equation}
+S_{D1}=\sum_{r \in \mathcal{R}} w_r \cdot \mathbf{1}[r] + \Delta_{\text{graph}}
+\end{equation}
+其中 $\Delta_{\text{graph}}$ 表示“反思指令 + 权威伪装”“反思指令 + 外传工作流”等共现模式带来的图式加分。
+
+\textbf{迁移分析。} Type-II 工具调用注入通常只需要判断“当前提示是否越权”；而 Type-III 的关键是“原始文本是否在操纵后台总结器”。因此 D1 不只看用户当前问题，而是检查原始低可信文本与生成候选的共同模式。
+
+\textbf{伪代码。}
+\begin{lstlisting}[caption={D1 反思意图筛查},label={alg:d1}]
+joined_text = concat(raw_turns, summary_text, fact_texts)
+score = 0
+for rule in RULES:
+    if rule_hit(joined_text):
+        score += rule.weight
+if reflection_directive co-occurs with workflow or authority:
+    score += graph_bonus
+if hard_block or score >= block_threshold:
+    return BLOCK
+if score >= flag_threshold:
+    return FLAG
+return PASS
+\end{lstlisting}
+
+\subsection{D2：摘要接地性审计}
+\textbf{目标。} 回答“这条反思事实是否真的被原始证据支撑”，而不是只看词面 overlap。
+
+\textbf{核心思想。} 把 turns 切分成句级证据候选，分别计算 lexical support、rarity score、slot score 和 source weight，再聚合为 provenance 分数。
+
+\textbf{句级选择公式。} 对候选句 $e$，分别记词面重合、稀有词覆盖、槽位一致性和来源权重为 $L(e)$、$R(e)$、$U(e)$ 和 $W(e)$，则
+\begin{equation}
+\text{selector}(e)=0.40L(e)+0.20R(e)+0.20U(e)+0.20W(e)
+\end{equation}
+
+\textbf{provenance 聚合公式。} 选出 top-$k$ 句级证据后，记第一条证据为 $e_1$，则
+\begin{equation}
+P_{D2}=0.50\text{selector}(e_1)
++0.20\overline{\text{selector}}
++0.10W(e_1)
++\Delta_{\text{exact}}
++\Delta_{\text{slot}}
++\Delta_{\text{trust}}
++\Delta_{\text{witness}}
++\Delta_{\text{diversity}}
+\end{equation}
+其中：
+\begin{itemize}[leftmargin=2em]
+  \item $\Delta_{\text{exact}}$：当 lexical support 接近精确匹配时加分；
+  \item $\Delta_{\text{slot}}$：当槽位和值都一致时加分；
+  \item $\Delta_{\text{trust}}$：当主证据来自 user/system 时加分；
+  \item $\Delta_{\text{witness}}$：当存在多条独立 evidence turn 时加分；
+  \item $\Delta_{\text{diversity}}$：当来源类型多样时加分。
+\end{itemize}
+
+\textbf{完整性降权。} 对身份、偏好、联系方式等 durable personal facts，若无 user/system witness，则 provenance 进一步乘以降权因子；assistant-only 的 benign restatement 只做轻度降权而非直接否决。
+
+\textbf{迁移分析。} 与普通 RAG 的“文档支持回答”不同，Type-III 的危险在于“低可信文本被摘要成高置信记忆”，所以 D2 不是面向最终回答，而是面向 memory admission 的句级来源审计。
+
+\subsection{D3：一致性校验}
+\textbf{目标。} 防止候选事实改写已经存在的高可信稳定槽位。
+
+\textbf{核心思想。} 对候选事实抽取 $(\text{slot}, \text{value})$，再与同类 memory record 的规范化槽位比较；若槽位相同而值不同，则触发冲突阻断。
+
+\textbf{判定函数。}
+\begin{equation}
+C_{D3}(f, M)=
+\begin{cases}
+1, & \exists m \in M,~slot(f)=slot(m)\land value(f)\neq value(m) \\
+0, & \text{otherwise}
+\end{cases}
+\end{equation}
+
+\textbf{说明。} 当前比赛版外部写入数据集更偏向“外部工作流污染”，因此 D3 在主数据集上的作用不如 D1/D2/D4 显性；但在单元测试中，D3 已验证能够对 contact slot 冲突执行硬阻断。
+
+\subsection{D4：长期记忆策略门控}
+\textbf{目标。} 不是所有可总结内容都应该进入长期记忆，尤其要阻止 credential、instruction 和 external workflow route 的持久化。
+
+\textbf{策略函数。}
+\begin{equation}
+G_{D4}(f)=
+\begin{cases}
+\text{BLOCK}, & f \in \{\text{credential}, \text{dangerous instruction}, \text{external route}\} \\
+\text{FLAG}, & f \in \{\text{ephemeral task}, \text{too short fact}\} \\
+\text{PASS}, & \text{otherwise}
+\end{cases}
+\end{equation}
+
+\textbf{迁移分析。} Type-II 更强调“工具权限是否越界”；Type-III 更强调“哪些内容根本不该被永久记住”。因此 D4 属于 memory admission policy，而不是 tool access policy。
+
+\subsection{D5：风险融合写闸}
+\textbf{目标。} 将 D1--D4 的信号压缩成统一风险分数，输出 accept/quarantine/reject。
+
+\textbf{风险函数。} 对事实 $f$，设注入分数为 $s_i$，接地性为 $p$，冲突分数为 $c$，策略分数为 $o$，则
+\begin{equation}
+R_{D5}(f)=
+w_i s_i + w_p(1-p) + w_c c + w_o o
+\end{equation}
+当前默认权重为
+\begin{equation}
+(w_i,w_p,w_c,w_o)=(0.35,0.35,0.20,0.10)
+\end{equation}
+
+\textbf{阈值策略。}
+\begin{itemize}[leftmargin=2em]
+  \item 若存在 D3/D4 硬约束，则直接 BLOCK；
+  \item 若 provenance 低于阈值，则在 quarantine 或 reject 间二选一；
+  \item 对 stable personal facts，若来自 user/system 且 support 足够，可触发 relaxed policy 以降低误伤。
+\end{itemize}
+
+\subsection{Provenance：来源标签、签名与审计链}
+\textbf{目标。} 让每条 accepted memory 都带着可追溯元数据，并可在未来检索时验签。
+
+\textbf{完整性标签。} 设来源标签集合为 $\{l_1,\ldots,l_n\}$，其完整性格满足 $\text{TRUSTED}>\text{CANDIDATE}>\text{UNTRUSTED}$，则聚合标签取下确界：
+\begin{equation}
+L=\bigwedge_{i=1}^{n} l_i
+\end{equation}
+在 risk-aware 模式下，若注入分数、接地性或写入风险过高，则完整性标签会再降级。
+
+\textbf{签名载荷。} 对每条 memory record，绑定如下 payload：
+\begin{equation}
+\text{payload}=
+(\text{record\_id}, \text{fact\_hash}, \text{summary\_hash}, L,
+\text{triggering\_query\_hash}, t, \text{evidence\_turn\_ids})
+\end{equation}
+当前默认采用 HMAC-SHA256，也支持 Ed25519。
+
+\textbf{审计链。} provenance 中还保存：
+\begin{itemize}[leftmargin=2em]
+  \item source types；
+  \item evidence turn IDs；
+  \item write time；
+  \item risk at write；
+  \item verdict trace（例如 D1:PASS, D2:FLAG, ...）。
+\end{itemize}
+
+\subsection{R1：检索期防御}
+\textbf{目标。} 避免未来正常查询把低完整性毒化记忆重新当成可信知识使用。
+
+\textbf{步骤。}
+\begin{enumerate}[leftmargin=2em]
+  \item 验签：若签名失败，则直接阻断；
+  \item trust ranking：基于 query score、provenance score 和 integrity label 重算权重；
+  \item hubness / cluster detection：识别高频异常命中与同源协调检索簇。
+\end{enumerate}
+
+\textbf{基础排序公式。} 对检索到的条目 $m$，记相似度为 $q(m)$，provenance 分数为 $p(m)$，完整性标签归一化值为 $\ell(m)$，则
+\begin{equation}
+W_{R1}(m)=0.60q(m)+0.25p(m)+0.15\ell(m)
+\end{equation}
+
+\textbf{hubness 阈值。} 若某条记忆历史命中次数为 $h(m)$，全局命中均值和标准差分别为 $\mu,\sigma$，则异常阈值为
+\begin{equation}
+\tau=\mu+\alpha\sigma
+\end{equation}
+当 $h(m)>\tau$ 且其 provenance 非 TRUSTED 且查询多样性高时，对其降权并告警。
+
+\textbf{协调簇检测。} 对同一 triggering query hash 生成的记忆簇，计算平均 Jaccard 相似度；若低完整性记忆形成高相似簇并共同命中，则视为 delayed poisoning indicator。
+
+\begin{lstlisting}[caption={检索期防御伪代码},label={alg:r1}]
+entries = top_k(memory_rank(query))
+for entry in entries:
+    if verify_signature(entry) == false:
+        block(entry)
+    else:
+        weight = 0.60 * query_score
+               + 0.25 * provenance_score
+               + 0.15 * integrity_label
+        if low_integrity(entry):
+            downweight(entry)
+        if hubness_abnormal(entry) or coordinated_cluster(entry):
+            flag_and_downweight(entry)
+return reranked_entries
+\end{lstlisting}
+
+\section{实验设计}
+
+\subsection{研究问题（RQ1--RQ6）}
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{RQ1：} D1 能否拦截显式 reflection steering？
+  \item \textbf{RQ2：} D2/D4/D5 能否阻止低可信事实洗白、secret persistence 和危险工作流持久化？
+  \item \textbf{RQ3：} R1 能否在检索阶段阻止 delayed retrieval hijack？
+  \item \textbf{RQ4：} 多节点组合是否显著优于单节点，是否存在“$1+1>2$”？
+  \item \textbf{RQ5：} Reflection 与 3 条基线相比表现如何？
+  \item \textbf{RQ6：} 纵深防御带来的延迟代价是否可接受，端到端链路是否真正被截断？
+\end{enumerate}
+其中，RQ1--RQ3 主要回答“单个节点是否覆盖对应攻击阶段”，RQ4 回答“组合是否优于单节点”，RQ5 回答“与外部基线相比是否占优”，RQ6 回答“这种优势是否在真实链路上仍然成立且代价可控”。
+
+\subsection{数据集构造}
+比赛版数据集为 \texttt{reflection\_type3\_competition.csv}，共 120 条样本，其中 80 条攻击样本、40 条良性样本，构成如表~\ref{tab:dataset} 所示。
+
+\begin{table}[H]
+\centering
+\caption{比赛版数据集组成}
+\label{tab:dataset}
+\begin{tabular}{lccp{6.0cm}}
+\toprule
+类别 & 数量 & 标签 & 说明 \\
+\midrule
+RS-1 & 20 & attack & 显式 reflection steering / summary-targeted prompt injection \\
+RS-2 & 20 & attack & 低可信事实洗白为 durable memory \\
+RS-3 & 20 & attack & secret 或 dangerous instruction persistence \\
+RS-4 & 20 & attack & delayed retrieval hijack / workflow poisoning \\
+BENIGN & 40 & benign & 由 user/system/assistant 支撑、允许持久化的正常事实 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+数据来源包括：
+\begin{enumerate}[leftmargin=2em]
+  \item PromptInject 风格的间接提示注入模式；
+  \item JailbreakBench 中可迁移的提示注入模式；
+  \item Tenable TRA-2025-11 所描述的 delayed-memory / reflection poisoning 思路；
+  \item 基于 Reflection 场景手工重建的 memory poisoning、workflow poisoning 样本。
+\end{enumerate}
+
+\subsection{配置设置}
+为回答 RQ4，本文采用由弱到强的 6 组配置，形成一条清晰的增量防御链：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Config-1}：无防御基线，用于刻画攻击上界；
+  \item \textbf{Config-2}：只启用 D1，用于观察显式反思诱导能否被单独拦截；
+  \item \textbf{Config-3}：在 D1 基础上加入词面接地基线，用于和更强的证据选择版 D2 对比；
+  \item \textbf{Config-4}：启用增强版 D2、Provenance 与 D4，用于衡量“写入期硬化”本身的增益；
+  \item \textbf{Config-5}：启用 D1--D5、Provenance 和 R1，是当前推荐的平衡比赛版；
+  \item \textbf{Config-6}：进一步启用严格写闸和严格隐私策略，用作高召回上界参考。
+\end{enumerate}
+
+\subsection{测试脚手架与可复现性}
+本次报告基于以下入口完成：
+\begin{enumerate}[leftmargin=2em]
+  \item 单元测试：\texttt{python -m unittest discover -s Reflection/tests -v}
+  \item 比赛版消融：\texttt{python -m Reflection.tests.eval\_reflection --dataset competition}
+  \item 基线对比：\texttt{python -m Reflection.tests.baseline\_compare --dataset competition}
+  \item 端到端：\texttt{python -m Reflection.tests.end\_to\_end\_reflection}
+\end{enumerate}
+
+截至本报告撰写时，\textbf{26 个单元测试全部通过}。
+
+\subsection{评价指标}
+我们使用 Precision、Recall、F1、FPR 和延迟百分位：
+\begin{align}
+\text{Prec} &= \frac{TP}{TP+FP} \\
+\text{Rec} &= \frac{TP}{TP+FN} \\
+\text{F1} &= \frac{2 \cdot \text{Prec} \cdot \text{Rec}}{\text{Prec}+\text{Rec}} \\
+\text{FPR} &= \frac{FP}{FP+TN}
+\end{align}
+并在全量配置行上报告 P50/P95/P99 毫秒延迟。
+
+\section{实验结果}
+
+\subsection{主要发现}
+在进入分项结果之前，可以先给出四条最重要的实验结论：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{类型三的关键风险确实发生在“反思写入 + 后续检索”两段链路。} Config-1 在 8/8 个端到端场景中都会最终执行危险动作，说明若不对记忆生命周期加防御，延迟攻击可以稳定成立。
+  \item \textbf{写入期节点与检索期节点承担的是不同职责。} D1 对显式反思诱导最有效，D2/D4/D5 主要覆盖事实洗白、秘密持久化和工作流污染，而 R1 的主要价值是在写入已发生时阻止未来检索继续放大风险。
+  \item \textbf{Config-5 是最均衡的主配置。} 它在整体上达到 Precision=1.000、Recall=0.756、F1=0.861、FPR=0.000，兼顾了攻击拦截能力和良性样本可用性。
+  \item \textbf{Config-6 证明了“更严格”不等于“更可部署”。} 它在攻击样本上达到完美召回，但由于对良性样本误伤过高，导致整体 FPR 达到 0.619，因此更适合作为上界参考而不是比赛推荐配置。
+\end{enumerate}
+
+\subsection{消融实验}
+表~\ref{tab:ablation} 给出 Config-1 到 Config-6 的整体结果。需要说明的是，Config-6 是“严格上界配置”，适合展示极限召回，但不适合作为比赛推荐部署版；Config-5 是当前最平衡、最适合展示的主配置。
+
+\begin{table}[H]
+\centering
+\caption{Config-1 到 Config-6 的整体消融结果}
+\label{tab:ablation}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l p{4.8cm} c c c c c c c}
+\toprule
+Config & 组件说明 & Prec & Rec & F1 & FPR & P50ms & P95ms & P99ms \\
+\midrule
+Config-1 & 无防御基线 & 0.000 & 0.000 & 0.000 & 0.000 & 0.07 & 0.11 & 0.17 \\
+Config-2 & 仅 D1（规则图） & 1.000 & 0.280 & 0.438 & 0.000 & 0.07 & 0.13 & 0.20 \\
+Config-3 & D1 + D2（词面接地基线） & 1.000 & 0.280 & 0.438 & 0.000 & 0.09 & 0.16 & 0.19 \\
+Config-4 & D1 + D2（证据选择）+ provenance + D4 & 1.000 & 0.537 & 0.698 & 0.000 & 0.17 & 0.39 & 0.48 \\
+Config-5 & 平衡比赛版：D1--D5 + provenance + R1 & 1.000 & 0.756 & 0.861 & 0.000 & 0.37 & 0.53 & 0.60 \\
+Config-6 & 严格高召回版：严格写闸 + 严格隐私 + 检索防御 & 0.759 & 1.000 & 0.863 & 0.619 & 0.35 & 0.48 & 0.61 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+这里需要特别说明 \textbf{ALL\_ATTACK} 与 \textbf{ALL} 两行的区别：前者只在攻击样本上统计，后者同时计入 40 条良性样本。因此，Config-6 在 ALL\_ATTACK 上确实达到了 Precision/Recall/F1 全 1.000，但在 ALL 上 Precision 降为 0.759、F1 仅为 0.863，原因不是漏拦攻击，而是其 FPR 高达 0.619，说明它误伤了大量良性样本。这一差异恰好说明：高召回并不自动等于可部署。
+
+\textbf{结论一：每个节点是否防住了对应攻击阶段？}
+\begin{enumerate}[leftmargin=2em]
+  \item D1 对 RS-1 明显有效：从 Config-1 的 0.000 Recall 提升到 Config-2 的 0.800（RS-1 子类）。
+  \item D2 + provenance + D4 显著提升了 RS-2、RS-3、RS-4 的拦截能力：Config-4 在三类隐蔽样本上的 Recall 已分别达到 0.300、0.700、0.400。
+  \item Config-5 打开 R1 后，RETRIEVAL 子集达到 Precision/Recall/F1 全 1.000，说明 delayed retrieval hijack 被有效覆盖。
+  \item D3 的主作用是“已存在可信槽位时的改写阻断”，它在单元测试中有效，但在当前外部写入导向的主数据集上不是最显著的贡献者。
+\end{enumerate}
+
+\textbf{结论二：组合是否存在“$1+1>2$”？}
+\begin{enumerate}[leftmargin=2em]
+  \item 最强单节点 write-path 配置是 D4-only，其整体 F1 为 0.574；
+  \item Config-5 的整体 F1 达到 0.861，远高于任一单节点；
+  \item Config-5 同时保持 FPR=0，而 Config-6 虽然 Recall=1.0，但 FPR 高达 0.619；
+  \item 因此在比赛语境下，“平衡组合防御”而非“极限强硬策略”更有价值。
+\end{enumerate}
+
+\subsection{各节点单独效果}
+表~\ref{tab:node-effects} 给出单节点或最小可作用组合的效果。D3 因依赖既有 trusted memory，不适合直接用当前外部写入主数据集单独量化，因此以单元测试结论补充说明。
+
+\begin{table}[H]
+\centering
+\caption{单节点/最小联动节点效果}
+\label{tab:node-effects}
+\begin{tabular}{l l c c c c p{5.2cm}}
+\toprule
+节点配置 & 作用路径 & Prec & Rec & F1 & FPR & 说明 \\
+\midrule
+D1-only & 写入链路 / 全体样本 & 1.000 & 0.280 & 0.438 & 0.000 & 擅长拦截显式 reflection steering，但无法单独解决隐蔽的信任漂白 \\
+D2+D5 & 写入链路 / 全体样本 & 1.000 & 0.329 & 0.495 & 0.000 & 仅靠接地性和写闸可拦截一部分伪事实洗白，但仍缺少显式策略知识 \\
+D4-only & 写入链路 / 全体样本 & 1.000 & 0.402 & 0.574 & 0.000 & 对 secret / instruction / route persistence 最直接有效 \\
+R1-only & 检索链路 & 1.000 & 1.000 & 1.000 & 0.000 & 对延迟检索簇和签名异常极有效，但无法防止恶意事实先写入 \\
+D3（单测） & 覆盖可信槽位 & --- & --- & --- & --- & \path{test_flags_conflicting_contact_detail} 通过，能阻断槽位值冲突 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{基线对比}
+本次报告采用 3 条基线：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{RegexPromptBaseline}：关键词/正则规则；
+  \item \textbf{TrustSourceBaseline}：来源可信度 + 外联痕迹启发式；
+  \item \textbf{DeepSeekReflectionBaseline}：基于 \texttt{deepseek-v4-flash} 的 LLM 决策基线。
+\end{enumerate}
+
+结果如表~\ref{tab:baseline} 所示。
+
+\begin{table}[H]
+\centering
+\caption{Config-5 与 3 条基线的整体比较}
+\label{tab:baseline}
+\begin{tabular}{l c c c c c c c}
+\toprule
+方法 & Prec & Rec & F1 & FPR & P50ms & P95ms & P99ms \\
+\midrule
+RegexPromptBaseline & 1.000 & 0.402 & 0.574 & 0.000 & 0.01 & 0.01 & 0.01 \\
+TrustSourceBaseline & 1.000 & 0.707 & 0.829 & 0.000 & 0.01 & 0.01 & 0.01 \\
+DeepSeekReflectionBaseline & 1.000 & 0.622 & 0.767 & 0.000 & 2120.86 & 3809.44 & 4285.75 \\
+Config-5（Reflection） & 1.000 & 0.756 & 0.861 & 0.000 & 0.37 & 0.53 & 0.60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{结论。}
+\begin{enumerate}[leftmargin=2em]
+  \item Config-5 的 F1 高于三条基线中的全部方法；
+  \item TrustSourceBaseline 是最强本地启发式基线，但仍低于 Config-5；
+  \item DeepSeek 基线在 Recall 上不如 Config-5，且延迟高出约 4 个数量级，不适合作为比赛演示时的主防御方案。
+\end{enumerate}
+
+\subsection{延迟分析}
+表~\ref{tab:latency} 比较主要配置和基线的整体延迟。可以看到，Reflection 的平衡版代价主要来自句级证据选择、provenance 绑定和 retrieval guard，但总体仍保持亚毫秒级；相比之下，远程 LLM 基线的延迟为秒级。
+
+\begin{table}[H]
+\centering
+\caption{主要方法延迟比较（ALL 行）}
+\label{tab:latency}
+\begin{tabular}{l c c c}
+\toprule
+方法 & P50ms & P95ms & P99ms \\
+\midrule
+Config-1 & 0.07 & 0.11 & 0.17 \\
+Config-4 & 0.17 & 0.39 & 0.48 \\
+Config-5 & 0.37 & 0.53 & 0.60 \\
+Config-6 & 0.35 & 0.48 & 0.61 \\
+RegexPromptBaseline & 0.01 & 0.01 & 0.01 \\
+TrustSourceBaseline & 0.01 & 0.01 & 0.01 \\
+DeepSeekReflectionBaseline & 2120.86 & 3809.44 & 4285.75 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{端到端验证}
+端到端实验模拟了“Q\_inject $\rightarrow$ 反思写入 $\rightarrow$ Q\_target $\rightarrow$ 检索 $\rightarrow$ 危险动作执行”的真实链路，共 8 个场景，覆盖：
+\begin{enumerate}[leftmargin=2em]
+  \item 邮件路由毒化；
+  \item 工资/报告导出重定向；
+  \item 软件源 / 供应链镜像劫持；
+  \item 密码重置审批污染；
+  \item token 复用诱导；
+  \item patch / bootstrap 脚本劫持；
+  \item customer export 抄送外传；
+  \item 命令执行引导。
+\end{enumerate}
+
+结果如表~\ref{tab:e2e} 所示。
+
+\begin{table}[H]
+\centering
+\caption{8 个端到端场景结果汇总}
+\label{tab:e2e}
+\begin{tabular}{l c c c}
+\toprule
+代理模式 & 危险执行数 & 写入拦截数 & 结论 \\
+\midrule
+unsafe & 8/8 & 0/8 & 无防御链路下，所有毒化样本都能最终执行危险动作 \\
+safe & 0/8 & 8/8 & Reflection 保护版在写入阶段全部拦截，未来查询不再取回危险记忆 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{对 RQ1--RQ6 的回答}
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{RQ1：} 是。D1 对 RS-1 显式反思操控最敏感，Config-2 的 RS-1 Recall 达到 0.800。
+  \item \textbf{RQ2：} 是。D2 的 evidence graph、D4 的策略门控和 D5 的风险融合共同显著提升 RS-2/RS-3/RS-4 的拦截率。
+  \item \textbf{RQ3：} 是。R1 开启后，RETRIEVAL 子集 Precision/Recall/F1 均为 1.000。
+  \item \textbf{RQ4：} 是。Config-5 的 F1=0.861，显著高于任何单节点和大部分简化组合。
+  \item \textbf{RQ5：} 是。Config-5 超过 DeepSeek、Regex 和 TrustSource 三条基线。
+  \item \textbf{RQ6：} 是。Config-5 保持亚毫秒级延迟，且端到端实验中 safe 代理 0/8 危险执行。
+\end{enumerate}
+
+\section{讨论与局限性}
+\subsection{为什么 Config-5 是推荐比赛版}
+Config-6 虽然在攻击样本上实现了 Recall=1.000，但 FPR 达到 0.619，说明其严格隐私策略与严格写闸对良性样本误伤过高；在比赛作品赛展示中，这会造成“全拦截但几乎不可用”的观感。相反，Config-5 同时保持：
+\begin{enumerate}[leftmargin=2em]
+  \item Precision=1.000；
+  \item FPR=0.000；
+  \item F1=0.861；
+  \item 检索期防御完整开启。
+\end{enumerate}
+因此 Config-5 更适合作为论文主表、演示主流程和答辩主配置。
+
+\subsection{部署建议}
+若目标是比赛展示或论文主结果，建议默认使用 Config-5，因为它最能体现 Reflection 的两个核心优势：其一，写入期与检索期形成闭环，而不是只做单点阻断；其二，在保持 FPR=0 的前提下仍能取得较高 Recall。Config-6 更适合在附录或补充实验中作为“严格上界”展示，用于说明系统在极端保守模式下可以把攻击召回推到 1.000，但这种模式不宜直接作为默认部署策略。
+
+\subsection{当前局限性}
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{D3 在主数据集上的显著性有限。} 当前比赛版数据集更偏“外部写入污染”，不是“覆盖已有可信槽位”的重写型攻击；因此 D3 的价值更多体现在单元测试与专门 consistency 场景上。
+  \item \textbf{数据集以英文为主。} 这是为了对齐 PromptInject/JailbreakBench 等公开资源；后续可扩展双语样本。
+  \item \textbf{主评测使用启发式 Reflector。} 这有利于可控复现，但真实大模型反思器可能带来额外语义变形，需要后续扩展到更多 LLM 端反思器。
+  \item \textbf{基线仍可继续扩展。} 目前已有 3 条基线，后续还可以补充更多现成 agent guard 或 memory guard 工具横向比较。
+\end{enumerate}
+
+\section{结论}
+本文围绕类型三“反思/合成写入”攻击实现了完整的 Reflection 防御体系，并从写入链路、provenance 链路和检索链路三个层面构建纵深防御。本文的核心结论可以归纳为三点：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{类型三的真实危险来自记忆生命周期而非单轮提示。} 只有同时保护“反思写入”和“未来检索”两段链路，才能阻断延迟触发型攻击。
+  \item \textbf{Config-5 是当前最适合比赛提交与答辩展示的平衡主配置。} 它在 120 条比赛版数据集上取得 F1=0.861、FPR=0.000，并在 8 个端到端场景中实现 safe 代理 0/8 危险执行。
+  \item \textbf{Reflection 已具备可复现、可量化、可解释的实验基础。} 120 条比赛版数据集、26 个通过的单元测试、3 条基线和 8 个端到端场景共同支撑了本文的结论。
+\end{enumerate}
+
+\begin{thebibliography}{99}
+
+\bibitem{greshake2023}
+Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres, Thorsten Holz, Mario Fritz.
+\newblock Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection.
+\newblock arXiv:2302.12173, 2023.
+\newblock \url{https://arxiv.org/abs/2302.12173}
+
+\bibitem{shinn2023}
+Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik Narasimhan, Shunyu Yao.
+\newblock Reflexion: Language Agents with Verbal Reinforcement Learning.
+\newblock arXiv:2303.11366, 2023.
+\newblock \url{https://arxiv.org/abs/2303.11366}
+
+\bibitem{jbb2024}
+Patrick Chao, Edoardo Debenedetti, Alexander Robey, et al.
+\newblock JailbreakBench: An Open Robustness Benchmark for Jailbreaking Large Language Models.
+\newblock arXiv:2404.01318, 2024.
+\newblock \url{https://arxiv.org/abs/2404.01318}
+
+\bibitem{promptinject}
+Agency Enterprise.
+\newblock PromptInject Repository.
+\newblock \url{https://github.com/agencyenterprise/PromptInject}
+
+\bibitem{jbbrepo}
+JailbreakBench.
+\newblock JailbreakBench Repository.
+\newblock \url{https://github.com/JailbreakBench/jailbreakbench}
+
+\bibitem{tenable2025}
+Tenable Research.
+\newblock TRA-2025-11.
+\newblock \url{https://www.tenable.com/security/research/tra-2025-11}
+
+\bibitem{khodayari2026}
+Soheil Khodayari, Xuenan Zhang, Bhupendra Acharya, Giancarlo Pellegrino.
+\newblock Indirect Prompt Injection in the Wild: An Empirical Study of Prevalence, Techniques, and Objectives.
+\newblock arXiv:2604.27202, 2026.
+\newblock \url{https://arxiv.org/abs/2604.27202}
+
+\bibitem{chen2025}
+Yulin Chen, Haoran Li, Yuan Sui, Yufei He, Yue Liu, Yangqiu Song, Bryan Hooi.
+\newblock Can Indirect Prompt Injection Attacks Be Detected and Removed?
+\newblock arXiv:2502.16580, 2025.
+\newblock \url{https://arxiv.org/abs/2502.16580}
+
+\end{thebibliography}
+
+\end{document}

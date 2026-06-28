@@ -1,0 +1,590 @@
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{float}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\title{External\_Developer\_Write：面向类型四“外部/开发者批量写入”攻击的纵深防御与实验评估报告}
+\author{AgentArmor External\_Developer\_Write 赛题实现说明}
+\date{2026年6月28日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+类型四“外部/开发者批量写入”攻击的关键不在于即时操纵对话，而在于攻击者或受污染的外部源通过上传、同步、API 写入、抓取等路径把恶意文档直接送入知识库，使毒化内容在嵌入、分块、索引和后续检索阶段持续生效。围绕这一持久化写入链路，本文实现了 \textbf{EDW（External / Developer Write）} 纵深防御体系：上传阶段使用 SP1 嵌入异常检测与 SP2 内容困惑度分析，分块/批次阶段使用 SP3 跨块连贯性、SP4 触发区域扫描和 SP7 语义依赖图分析，检索阶段使用 SP5 鲁棒聚合与 SP6 后检索一致性验证。基于 200 文档比赛版数据集（120 条攻击样本、80 条良性样本）、12 个单节点消融实验、5 组配置实验和 3 条基线，本报告得到三个核心结论：其一，SP4 在 AgentPoison 基础场景上达到 F1=0.9677，SP5 在 Tool Misuse 场景上达到 F1=1.0000，说明局部结构化防御对紧凑触发词聚类与工具误用具有很强效果；其二，SP3 与 SP7 在当前语义碎片化数据上的 F1 仍为 0，表明跨块/跨文档语义混淆仍是当前系统的主要短板；其三，DeepSeek-v4-Flash 与字符级困惑度基线在统一 200 文档数据集上的整体 F1 分别达到 0.9610 和 0.9877，而本系统的优势主要体现在本地可部署、低延迟、分阶段可解释防御，而非当前版本下的单一总指标最优。报告随后依次给出问题定义、威胁模型、节点理论、实验设计、消融结果、基线对比、延迟分析与局限性讨论。
+\end{abstract}
+
+\paragraph{报告主线。}
+本文按照“攻击定义与攻击链 $\rightarrow$ 威胁模型与攻击面 $\rightarrow$ 防御节点设计 $\rightarrow$ 实验设计 $\rightarrow$ 消融、配置与基线结果 $\rightarrow$ 局限性与部署建议”的顺序展开，重点回答两个问题：其一，SP1--SP7 是否分别覆盖了对应攻击阶段；其二，当前实现的真实优势究竟是更强的总指标，还是更强的阶段化、低延迟、可解释防御能力。
+
+\section{类型四攻击定义与系统流程}
+
+\subsection{类型四的对象与危险性}
+本文所说的“类型四”是指 \textbf{外部/开发者批量写入（External / Developer Write）攻击}：攻击者不必等待与主代理交互，而是通过知识库上传、同步任务、抓取管线、开发者批处理导入或外部源接入等路径，把带有恶意指令、检索诱饵、危险工作流或伪事实的文档批量写入长期知识库。
+
+与普通对话式提示注入相比，类型四至少有四个额外危险点：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{预先持久化。} 攻击发生在用户查询之前，恶意内容可在知识库中长期潜伏。
+  \item \textbf{检索放大。} 一旦文档被索引，后续多个查询都可能命中同一批毒化内容。
+  \item \textbf{供应链污染。} 风险不仅来自用户输入，也可能来自开发者导入、外部 API 同步和抓取数据源。
+  \item \textbf{跨阶段传播。} 恶意载荷会先经历嵌入、分块、检索、拼接，再最终影响 LLM 响应或工具调用。
+\end{enumerate}
+
+\subsection{系统流程}
+External\_Developer\_Write 的被保护对象不是单轮提示，而是一条典型的“外部文档写入 $\rightarrow$ 分块与索引 $\rightarrow$ 检索拼接 $\rightarrow$ LLM 使用”的知识库生命周期。整体流程可写为：
+\begin{equation}
+D_{\text{ext}}
+\xrightarrow{\text{upload / sync / scrape}}
+U
+\xrightarrow{\text{SP1, SP2}}
+B
+\xrightarrow{\text{chunk}}
+C
+\xrightarrow{\text{SP3, SP4, SP7}}
+M
+\xrightarrow{\text{retrieve}}
+R
+\xrightarrow{\text{SP5, SP6}}
+\hat{R}
+\xrightarrow{\text{LLM use}}
+a
+\end{equation}
+其中，$D_{\text{ext}}$ 表示来自上传、API、同步或抓取的外部文档，$B$ 表示通过上传阶段检测后的文档集合，$C$ 表示分块结果，$M$ 表示已进入索引/向量库的知识库状态，$R$ 表示检索返回集合，$\hat{R}$ 表示经鲁棒聚合和一致性过滤后的可信上下文，$a$ 表示最终代理回答或动作。
+
+\subsection{典型攻击链}
+结合项目测试脚手架和数据集构造，类型四的攻击链可抽象为：
+\begin{enumerate}[leftmargin=2em]
+  \item 攻击者构造带有注入指令、触发词、危险路由或伪事实的外部文档。
+  \item 恶意文档经上传、同步、抓取或开发者导入进入知识库写入路径。
+  \item 文档被嵌入、分块和索引，形成稳定的检索候选。
+  \item 用户后续提出正常查询，系统检索到这些毒化文档。
+  \item 若缺少鲁棒聚合和后检索过滤，LLM 会把这些文档当作可信上下文使用。
+  \item 最终结果表现为越权工具建议、秘密导出、供应链镜像劫持、记忆污染或目标劫持。
+\end{enumerate}
+
+从链路视角看，类型四有三个关键断点：其一，在文档上传时阻止异常样本入库；其二，在分块/索引后识别碎片化或紧凑聚类攻击；其三，在检索时对已入库的可疑内容做最后过滤。本文的 SP1--SP4 对应前两类断点，SP5--SP6 对应第三类断点，SP7 则试图覆盖跨文档碎片化这一更隐蔽场景。
+
+\section{攻击面分析与威胁模型}
+
+\subsection{攻击面分析}
+类型四链路中的主要攻击面如表~\ref{tab:type4-attack-surface} 所示。
+
+\begin{table}[H]
+\centering
+\caption{类型四链路中的主要攻击面}
+\label{tab:type4-attack-surface}
+\begin{tabular}{p{2.2cm} p{4.4cm} p{6.4cm}}
+\toprule
+阶段 & 攻击面 & 典型威胁 \\
+\midrule
+上传期 & 原始文档、API 写入、同步源、抓取源 & PoisonedRAG、指令子文本注入、外部源污染 \\
+分块期 & chunk 切分与相邻边界 & 语义碎片化、跨块重组、局部无害全局有害 \\
+索引期 & 向量空间分布、周期扫描 & AgentPoison 触发词紧凑聚类、异常检索热点 \\
+检索期 & Top-k 拼接、组间聚合、重排序 & Tool Misuse、Memory Poisoning、Agent Hijacking \\
+跨文档期 & 同批次文档组与语义依赖 & cross-doc semantic confusion、hybrid attacks \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{威胁模型}
+\textbf{攻击者能力：}
+\begin{enumerate}[leftmargin=2em]
+  \item 攻击者能够控制至少一种外部写入路径，如上传文档、外部抓取源、同步数据源或开发者导入批次。
+  \item 攻击者不能直接修改系统提示、检测器代码或已部署防御逻辑，但可以反复尝试构造更隐蔽的文档内容。
+  \item 攻击者的目标不是单次对话，而是让恶意文档进入长期知识库并在未来查询中稳定命中。
+\end{enumerate}
+
+\textbf{攻击目标：}
+\begin{enumerate}[leftmargin=2em]
+  \item 让恶意文档在检索阶段持续进入 Top-k；
+  \item 诱导 LLM 生成越权工具建议、危险系统命令、外部数据导出流程；
+  \item 通过记忆/事实污染使未来回答偏向攻击者预设的工作流或错误事实。
+\end{enumerate}
+
+\textbf{防守前提：}
+\begin{enumerate}[leftmargin=2em]
+  \item 系统采用“文档入库 $\rightarrow$ 向量检索 $\rightarrow$ LLM 生成”的 RAG 或知识库代理架构；
+  \item 防守方可以在上传、分块、周期扫描和检索阶段插入额外检测逻辑；
+  \item 防守方不依赖重新训练底座模型，而是通过外置节点实现防御。
+\end{enumerate}
+
+\subsection{攻击类别映射}
+当前比赛版数据集覆盖 8 类主要攻击：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Prompt Injection}：显式指令覆盖、角色扮演、格式劫持、多语言绕过；
+  \item \textbf{Tool Misuse}：转账、导出、权限提升、配置篡改、破坏性命令；
+  \item \textbf{Memory Poisoning}：身份、系统状态、事实与对话记忆污染；
+  \item \textbf{Agent Hijacking}：目标替换、上下文操纵、子代理操纵与数据外传引导；
+  \item \textbf{Enhanced PoisonedRAG}：I-instruct 与 I-subtext 两类文档投毒；
+  \item \textbf{Enhanced AgentPoison}：显式触发词驱动的紧凑嵌入聚类；
+  \item \textbf{Enhanced Semantic Confusion}：跨块、跨文档与实体碎片化攻击；
+  \item \textbf{Hybrid Attacks}：多攻击类型组合。
+\end{enumerate}
+
+\subsection{攻击阶段与防御节点对应关系}
+为了避免“SP 节点很多但边界不清”的问题，表~\ref{tab:type4-stage-defense-map} 给出攻击阶段、核心风险与主要防御节点之间的对应关系。
+
+\begin{table}[H]
+\centering
+\caption{攻击阶段与防御节点对应关系}
+\label{tab:type4-stage-defense-map}
+\begin{tabular}{p{2.3cm} p{4.4cm} p{3.4cm} p{3.7cm}}
+\toprule
+攻击阶段 & 核心风险 & 主要节点 & 预期处置 \\
+\midrule
+上传期 & 嵌入异常、指令子文本、分布偏移 & SP1 + SP2 & 标记或阻止异常文档入库 \\
+分块期 & 相邻 chunk 语义断裂 & SP3 & 标记可疑边界或整篇文档 \\
+索引期 & 异常紧凑聚类、触发区域 & SP4 & 周期扫描、隔离高风险文档 \\
+检索期 & 恶意文档被拼接成上下文 & SP5 + SP6 & 稀释攻击影响、过滤低信任文档 \\
+跨文档期 & 跨文档语义碎片化与混合攻击 & SP7 & 标记可疑文档组 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{防御设计与理论方案}
+
+\subsection{总体设计}
+External\_Developer\_Write 采用“上传前置检测 + 分块/索引监测 + 检索期鲁棒化”的纵深结构。其逻辑主线可以概括为七个连续问题：SP1 回答“这个文档在嵌入空间上是否异常”，SP2 回答“它是否包含非自然的指令式子文本”，SP3 回答“chunk 边界是否存在非自然断裂”，SP4 回答“知识库中是否出现了人为制造的紧凑触发词区域”，SP5 回答“即使存在投毒文档，能否通过组间聚合稀释其影响”，SP6 回答“检索结果与查询、与彼此、与模型先验是否一致”，SP7 则试图回答“跨文档语义结构是否表现出人为拼接”。
+
+从实现上看，系统通过四个主入口完成链路编排：
+\begin{enumerate}[leftmargin=2em]
+  \item \texttt{upload\_document(doc)}：上传期执行 SP1 与 SP2；
+  \item \texttt{process\_chunks(doc\_id, chunks)}：分块期执行 SP3，并为 SP7 预留批次分析标记；
+  \item \texttt{periodic\_scan()}：后台周期任务执行 SP4；
+  \item \texttt{retrieve\_and\_verify(query, docs)}：检索期执行 SP5 或 SP6。
+\end{enumerate}
+
+\subsection{SP1：嵌入异常检测}
+\textbf{目标。} 识别在嵌入空间中被故意推向目标查询附近的投毒文档。
+
+\textbf{核心思想。} 投毒文档虽然在文本层面可以伪装为正常内容，但在嵌入空间中往往偏离正常语料流形；因此将全局偏移（马氏距离）与局部密度异常（LOF）做加权融合。
+
+\textbf{风险函数。} 设文档嵌入为 $x$，均值向量为 $\mu$，收缩协方差逆为 $\hat{\Sigma}^{-1}$，则其全局偏移可写为
+\begin{equation}
+D_M(x)=\sqrt{(x-\mu)^\top \hat{\Sigma}^{-1}(x-\mu)}
+\end{equation}
+再与局部离群因子 $LOF(x)$ 融合为
+\begin{equation}
+S_{SP1}(x)=\lambda_1 \widetilde{D_M}(x)+\lambda_2 \widetilde{LOF}(x)
+\end{equation}
+当 $S_{SP1}(x)>\tau_1$ 时标记为异常。
+
+\subsection{SP2：内容困惑度分析}
+\textbf{目标。} 检测文档内部的“影响子文本”，即伪装成说明文字的指令式片段。
+
+\textbf{核心思想。} 文档投毒中的 I-subtext 往往表现为局部高困惑度、前后段困惑度不一致、或局部窗口明显偏离全局文本分布。SP2 因此联合使用全局 PPL、前后差异和局部峰值。
+
+\textbf{基础量。}
+\begin{equation}
+PPL(d)=\exp\left(-\frac{1}{T}\sum_{t=1}^{T}\log p(w_t \mid w_{<t})\right)
+\end{equation}
+\begin{equation}
+PD(d)=PPL(d_{\text{pre}})-PPL(d_{\text{post}}), \qquad
+PM(d)=\max(PPL(d_{\text{pre}}), PPL(d_{\text{post}}))
+\end{equation}
+若某局部窗口的 $PPL_{\text{local}} / PPL_{\text{global}}$ 过高，则表明局部存在异常指令片段。
+
+\subsection{SP3：跨块连贯性验证}
+\textbf{目标。} 识别将攻击指令碎片化到多个 chunk 中的跨块语义混淆攻击。
+
+\textbf{核心思想。} 单个 chunk 看似正常，但相邻 chunk 边界处会出现不自然的语义断裂。SP3 先用相邻 chunk 嵌入余弦连贯性做粗筛，再在可疑边界上触发更贵的语言模型条件概率检查，并可结合局部语义图分析。
+
+\textbf{连贯性量。}
+\begin{equation}
+C_{\cos}(c_i,c_{i+1})=\cos(e_i,e_{i+1})
+\end{equation}
+\begin{equation}
+C_{\text{LM}}(c_i,c_{i+1})=
+\frac{1}{K}\sum_{j=1}^{K}\log p(w_j \mid c_i)
+\end{equation}
+当 $C_{\cos}$ 很低且 $C_{\text{LM}}$ 无法补偿时，可判定边界可疑。
+
+\subsection{SP4：触发区域检测}
+\textbf{目标。} 检测 AgentPoison 类攻击在嵌入空间中形成的人为紧凑聚类。
+
+\textbf{核心思想。} AgentPoison 不依赖单条恶意指令，而是通过优化触发词让一批文档在嵌入空间中异常紧凑。SP4 因此综合使用 LOF、邻域归一化半径（NNR）和聚类紧凑度。
+
+\textbf{紧凑性指标。}
+\begin{equation}
+NNR_k(d)=\frac{\text{avg\_knn\_dist}(d)}{\text{global\_avg\_knn\_dist}}
+\end{equation}
+\begin{equation}
+Compactness(C)=\frac{1}{|C|^2}\sum_{i,j}\lVert e_i-e_j\rVert_2
+\end{equation}
+融合得分可写为
+\begin{equation}
+S_{SP4}(d)=\lambda_{\text{lof}}\phi_{\text{lof}}(d)+
+\lambda_{\text{nnr}}\phi_{\text{nnr}}(d)+
+\lambda_{\text{comp}}\phi_{\text{comp}}(d)
+\end{equation}
+其中越紧凑、越偏离正常分布的聚类越可疑。
+
+\subsection{SP5：鲁棒聚合检索}
+\textbf{目标。} 在检索结果已被部分污染时，仍尽可能输出不受少量恶意文档操纵的答案。
+
+\textbf{核心思想。} 将 Top-k 检索结果划分为多组，每组独立推理，再做关键词或解码层面的聚合。若攻击者只能控制少数分组，则其关键词无法跨组达到表决阈值。
+
+\textbf{组间表决阈值。} 设非弃权组数为 $n$，关键词阈值为
+\begin{equation}
+\mu=\min(\alpha n,\beta)
+\end{equation}
+若攻击者控制的有效恶意组数 $k' < \mu$，则其无法单独让恶意关键词通过聚合门槛。这是 SP5 相比其他节点最特殊的地方：它不是只做检测，而是尝试提供组级鲁棒性保证。
+
+\subsection{SP6：后检索一致性验证}
+\textbf{目标。} 在 LLM 使用上下文之前，过滤与查询、与主流文档或与模型先验明显冲突的检索结果。
+
+\textbf{核心思想。} SP6 采用三维一致性：查询-文档一致性（Q-Consistency）、文档-文档一致性（C-Consistency）和模型一致性（M-Consistency）。
+
+\textbf{信任得分。} 若对齐得分为 $Align(Q,d)$，一致性惩罚为 $P_c(d)$，模型事实支持为 $Fact(d)$，则可写为
+\begin{equation}
+Trust(d)=Align(Q,d)\cdot\left(0.5+0.5P_c(d)\right)\cdot Fact(d)
+\end{equation}
+对齐项通常由余弦相似度与交叉编码器得分融合得到；一致性偏离越大、与无上下文回答越矛盾的文档，其 $Trust(d)$ 越低。
+
+\subsection{SP7：语义依赖图分析}
+\textbf{目标。} 检测跨文档语义碎片化与混合攻击。
+
+\textbf{核心思想。} 若攻击者将实体、关系和意图拆散到多篇文档中，那么单篇文档看似无害，但跨文档图结构会表现出异常稀疏、跨文档边比例失衡等特征。SP7 因此先抽取语义三元组，再构建文档组的语义依赖图。
+
+\textbf{图结构量。}
+\begin{equation}
+\rho(G)=\frac{2|E|}{|V|(|V|-1)}
+\end{equation}
+\begin{equation}
+ratio_{\text{cross}}=\frac{\text{cross\_doc\_edges}}{\text{total\_edges}}
+\end{equation}
+正常批次通常表现为较稳定的语义连通性，而人为拼接的碎片化攻击更容易使整体图密度偏低。
+
+\section{实验设计}
+
+\subsection{研究问题（RQ1--RQ6）}
+为了让实验问题与系统链路一致，本文将研究问题统一整理为：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{RQ1：} 上传阶段的统计与文本异常检测（SP1、SP2）能否拦截文档投毒和提示注入？
+  \item \textbf{RQ2：} 分块与批次分析（SP3、SP7）能否识别语义碎片化与跨文档混淆？
+  \item \textbf{RQ3：} 周期扫描与嵌入区域分析（SP4）能否发现 AgentPoison 紧凑聚类？
+  \item \textbf{RQ4：} 检索阶段防御（SP5、SP6）能否抑制工具误用、记忆污染与目标劫持？
+  \item \textbf{RQ5：} 配置组合是否带来覆盖面提升，且延迟代价是否可接受？
+  \item \textbf{RQ6：} 与规则、统计和 LLM 三类基线相比，当前系统的真实优势与短板分别是什么？
+\end{enumerate}
+
+\subsection{数据集构造}
+比赛版数据集总计 200 条文档，其中 120 条攻击样本、80 条良性样本，构成如表~\ref{tab:type4-dataset} 所示。
+
+\begin{table}[H]
+\centering
+\caption{比赛版数据集组成}
+\label{tab:type4-dataset}
+\begin{tabular}{lccp{6.1cm}}
+\toprule
+类别 & 数量 & 标签 & 说明 \\
+\midrule
+Prompt Injection & 30 & attack & 直接覆盖、角色扮演、格式劫持、系统消息模拟、多语言绕过 \\
+Tool Misuse & 20 & attack & 金融操作、数据导出、权限提升、配置修改、破坏性命令 \\
+Memory Poisoning & 20 & attack & 身份、系统状态、外部事实与对话记忆投毒 \\
+Agent Hijacking & 20 & attack & 目标替换、上下文操纵、子代理操纵、数据泄露引导 \\
+Enhanced PoisonedRAG & 10 & attack & I-instruct / I-subtext 两类文档投毒 \\
+Enhanced AgentPoison & 10 & attack & 显式触发词驱动的紧凑嵌入聚类 \\
+Enhanced Semantic Confusion & 10 & attack & cross-chunk、cross-doc 与 entity fragmentation \\
+Hybrid Attacks & 10 & attack & 多攻击类型复合攻击 \\
+BENIGN & 80 & benign & 常规知识库文档（conftest + extra） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+数据来源沿用项目测试脚手架中标注的公开来源与手工重建样本，包括 PoisonedRAG、AgentPoison、JailbreakBench、SafeRAG、AgentDojo 和 Gandalf 风格样本。
+
+\subsection{测试脚手架与可复现性}
+本报告主要基于以下入口与结果文件：
+\begin{enumerate}[leftmargin=2em]
+  \item 全量测试：\texttt{python -m pytest External\_Developer\_Write/tests -q}
+  \item 单节点与配置消融：\texttt{External\_Developer\_Write/tests/ablation\_evaluation.py}
+  \item 基线对比：\texttt{External\_Developer\_Write/tests/baseline\_compare.py}
+  \item 汇总报告：\texttt{External\_Developer\_Write/tests/reports/Type4\_综合评估报告.md}
+\end{enumerate}
+
+在本次整理过程中，我实际运行了：
+\begin{equation}
+\texttt{python -m pytest External\_Developer\_Write/tests -q}
+\end{equation}
+结果为 \textbf{131 passed, 1 skipped}。
+
+\subsection{单节点实验与配置实验}
+为了回答不同层面的研究问题，当前脚手架包含两组互补实验：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{单节点消融（TA-01 $\sim$ TA-12）。} 直接测量某个 SP 节点对其目标攻击面的 Precision、Recall、F1 与 FPR。
+  \item \textbf{配置覆盖实验（Config-1 $\sim$ Config-5）。} 以管线配置为单位观察不同节点组合的攻击覆盖率和延迟。
+\end{enumerate}
+
+这里要特别说明：\textbf{当前配置实验主要是阶段化覆盖实验，而不是与基线完全同口径的统一 200 文档二分类实验。} 因此，单节点 F1 和基线 F1 是严格可比的，而 Config-1 $\sim$ Config-5 的“综合告警率”更适合回答覆盖率和管线角色问题，不宜直接与 DeepSeek 或 Perplexity 的整体 F1 做一行比较。
+
+\subsection{评价指标}
+单节点与基线实验使用 Precision、Recall、F1、FPR：
+\begin{align}
+\text{Prec} &= \frac{TP}{TP+FP} \\
+\text{Rec} &= \frac{TP}{TP+FN} \\
+\text{F1} &= \frac{2\cdot \text{Prec}\cdot \text{Rec}}{\text{Prec}+\text{Rec}} \\
+\text{FPR} &= \frac{FP}{FP+TN}
+\end{align}
+同时报告 P50/P95/P99 延迟。配置实验则以综合告警率和分攻击类型覆盖率为主。
+
+\section{实验结果}
+
+\subsection{主要发现}
+在进入分项结果之前，可以先给出四条最重要的实验结论：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{系统最强的部分不是“所有节点都强”，而是 SP4、SP5 在各自目标攻击面上表现非常强。} SP4 对 AgentPoison 基础场景达到 F1=0.9677，SP5 对 Tool Misuse 达到 F1=1.0000。
+  \item \textbf{语义碎片化仍是当前实现的主要短板。} SP3 与 SP7 在当前语义混淆数据上的 F1 仍为 0，说明跨块/跨文档关系建模还不够稳定。
+  \item \textbf{系统的真实优势是低延迟与阶段化防御，而不是当前版本下统一总指标全面领先。} DeepSeek 与 Perplexity 基线在统一 200 文档数据集上的整体 F1 更高，但它们分别依赖远程 API 或对合成分布高度敏感。
+  \item \textbf{Config 组合实验说明了“节点角色分工”，但目前还不足以证明强组合一定严格优于弱组合。} 在当前上传期覆盖实验中，Config-1、Config-2、Config-3 和 Config-5 的综合告警率都达到 100\%，说明该实验更适合展示覆盖边界，而不是精细区分组合优劣。
+\end{enumerate}
+
+\subsection{单节点消融实验}
+表~\ref{tab:type4-single-node} 给出 TA-01 到 TA-12 的单节点结果。
+
+\begin{table}[H]
+\centering
+\caption{单节点消融结果（TA-01 $\sim$ TA-12）}
+\label{tab:type4-single-node}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l l c c c c}
+\toprule
+实验 ID & 节点与目标攻击 & Precision & Recall & F1 & FPR \\
+\midrule
+TA-01 & SP1 vs PoisonedRAG (basic) & 0.5278 & 0.9500 & 0.6786 & 0.8500 \\
+TA-02 & SP1 vs PoisonedRAG (enhanced) & 0.5556 & 1.0000 & 0.7143 & 0.4000 \\
+TA-03 & SP2 vs Prompt Injection & 0.7500 & 1.0000 & 0.8571 & 1.0000 \\
+TA-04 & SP3 vs Semantic Confusion (basic) & 0.0000 & 0.0000 & 0.0000 & 0.0000 \\
+TA-05 & SP3 vs Semantic Confusion (enhanced) & 0.0000 & 0.0000 & 0.0000 & 0.0000 \\
+TA-06 & SP4 vs AgentPoison (basic) & 0.9375 & 1.0000 & 0.9677 & 0.0333 \\
+TA-07 & SP4 vs AgentPoison (enhanced) & 0.9091 & 0.5000 & 0.6452 & 0.0250 \\
+TA-08 & SP5 vs Tool Misuse & 1.0000 & 1.0000 & 1.0000 & 0.0000 \\
+TA-09 & SP6 vs Memory Poisoning & 0.6250 & 1.0000 & 0.7692 & 1.0000 \\
+TA-10 & SP6 vs Agent Hijacking & 0.5714 & 0.8000 & 0.6667 & 1.0000 \\
+TA-11 & SP7 vs Semantic Confusion (cross-doc) & 0.0000 & 0.0000 & 0.0000 & 0.0000 \\
+TA-12 & SP7 vs Hybrid Attacks & 0.0000 & 0.0000 & 0.0000 & 0.0000 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\textbf{结论一：每个节点是否覆盖了对应攻击阶段？}
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{SP1 覆盖上传期嵌入异常。} 它对增强版 PoisonedRAG 的 Recall 达到 1.0000，但 FPR 较高，说明它更像高召回预警器，而不是单独可部署的阻断器。
+  \item \textbf{SP2 覆盖上传期指令子文本。} 它对 Prompt Injection 的 Recall 为 1.0000，但 FPR 也达到 1.0000，说明当前阈值在“宁可多报也不漏报”的方向上较激进。
+  \item \textbf{SP4 覆盖索引期紧凑触发区域。} 它是当前最稳定的高性能节点，对 AgentPoison 基础场景给出 F1=0.9677，且 FPR 仅 0.0333。
+  \item \textbf{SP5 覆盖检索阶段工具误用。} 其 F1=1.0000，表明组间鲁棒聚合对明显的工具误用提示具有很强抑制能力。
+  \item \textbf{SP6 覆盖后检索一致性风险。} 它对 Memory Poisoning 和 Agent Hijacking 有一定效果，但良性误伤较高，说明一致性阈值仍需校准。
+  \item \textbf{SP3 和 SP7 目前尚未有效覆盖语义碎片化。} 这不是“该攻击不存在”，而是当前实现尚未把跨块/跨文档关系信号稳定转化为高质量分类结果。
+\end{enumerate}
+
+\subsection{配置覆盖实验}
+表~\ref{tab:type4-configs} 给出 Config-1 到 Config-5 的配置覆盖实验结果。
+
+\begin{table}[H]
+\centering
+\caption{Config-1 到 Config-5 的覆盖实验结果}
+\label{tab:type4-configs}
+\begin{tabular}{l p{4.6cm} c c c}
+\toprule
+Config & 节点集合 & 综合告警率 & P50ms & P95ms \\
+\midrule
+Config-1 (FAST) & SP1 + SP2 & 100.00\% & 0.0817 & 0.1334 \\
+Config-2 (STANDARD) & SP1 + SP2 + SP3 & 100.00\% & 0.0809 & 0.1046 \\
+Config-3 (FULL\_UPLOAD) & SP1 + SP2 + SP3 + SP4 & 100.00\% & 0.0822 & 0.2289 \\
+Config-4 (RETRIEVAL) & SP5 + SP6 & 0.00\% & 0.0008 & 0.0013 \\
+Config-5 (MAX) & SP1--SP7 全开 & 100.00\% & 0.1332 & 0.2058 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+这里需要特别说明两个解释边界：
+\begin{enumerate}[leftmargin=2em]
+  \item Config-4 之所以为 0，不是因为检索防御无效，而是因为该覆盖实验主要调用上传期路径；RETRIEVAL 配置按设计不会在上传阶段触发告警。
+  \item Config-1、Config-2、Config-3 和 Config-5 同时达到 100\%，并不意味着额外节点毫无价值，而是意味着当前覆盖实验所选样本更容易在上传期被 SP1/SP2 报警，因此它更适合展示“角色分工”而非“谁的总指标更高”。
+\end{enumerate}
+
+\textbf{结论二：组合是否存在“$1+1>2$”？}
+\begin{enumerate}[leftmargin=2em]
+  \item 从单节点角度看，确实存在显著互补：SP1/SP2 更擅长上传期异常，SP4 擅长紧凑触发区域，SP5/SP6 擅长检索期过滤。
+  \item 但从当前 Config-1 $\sim$ Config-5 覆盖实验本身，还不能严格得出“Config-5 明显优于 Config-1”的统一统计结论，因为该实验对上传阶段过于敏感，导致强弱配置被同一批样本同时打满。
+  \item 因此，\textbf{当前最稳妥的结论不是“组合指标已经全面胜出”，而是“组合实现了更完整的链路覆盖”。} 这也是类型四系统与类型三系统在实验呈现上的一个重要差异。
+\end{enumerate}
+
+\subsection{基线横向对比}
+本次报告采用 3 条基线：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Keyword Rule}：21 条正则模式匹配的规则引擎；
+  \item \textbf{Perplexity (n-gram)}：字符级 5-gram 困惑度异常检测；
+  \item \textbf{DeepSeek-v4-Flash}：基于远程 LLM 的逐文档分类基线。
+\end{enumerate}
+
+表~\ref{tab:type4-baseline-overall} 给出三条基线在统一 200 文档数据集上的整体结果。
+
+\begin{table}[H]
+\centering
+\caption{三条基线在统一 200 文档数据集上的整体结果}
+\label{tab:type4-baseline-overall}
+\begin{tabular}{l c c c c c c c}
+\toprule
+方法 & Prec & Rec & F1 & FPR & P50ms & P95ms & P99ms \\
+\midrule
+Keyword Rule & 1.0000 & 0.3583 & 0.5276 & 0.0000 & 0.0487 & 0.0663 & 0.0861 \\
+Perplexity (n-gram) & 0.9756 & 1.0000 & 0.9877 & 0.0375 & 0.0853 & 0.1525 & 0.2416 \\
+DeepSeek-v4-Flash & 1.0000 & 0.9250 & 0.9610 & 0.0000 & 1019.0805 & 1259.1510 & 1620.9627 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{重要说明。} 当前 SP 系统的测试方式是“按攻击阶段和节点职责分解评测”，因此没有与上表严格同口径的统一 Config-5 全局 F1。为了保证比较逻辑正确，表~\ref{tab:type4-best-node-vs-baseline} 改为使用“每类攻击的最佳 SP 节点”与三条基线进行逐攻击面比较。
+
+\begin{table}[H]
+\centering
+\caption{每类攻击的最佳 SP 节点与三条基线对比（F1）}
+\label{tab:type4-best-node-vs-baseline}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l c c c c}
+\toprule
+攻击类型 & DeepSeek-v4-Flash & Keyword Rule & Perplexity & SP 系统最佳节点 \\
+\midrule
+Prompt Injection & 0.9474 & 0.5366 & 1.0000 & 0.8571 (SP2) \\
+Tool Misuse & 1.0000 & 0.5185 & 1.0000 & 1.0000 (SP5) \\
+Memory Poisoning & 0.9744 & 0.0000 & 1.0000 & 0.7692 (SP6) \\
+Agent Hijacking & 0.9744 & 0.2609 & 1.0000 & 0.6667 (SP6) \\
+Enhanced PoisonedRAG & 0.7500 & 0.6667 & 1.0000 & 0.7143 (SP1) \\
+Enhanced AgentPoison & 1.0000 & 1.0000 & 1.0000 & 0.9677 (SP4) \\
+Hybrid & 1.0000 & 0.8235 & 1.0000 & 0.0000 (SP7) \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\textbf{结论三：与基线相比，当前系统的真实位置是什么？}
+\begin{enumerate}[leftmargin=2em]
+  \item 如果只看统一 200 文档总体分类指标，当前系统还不能诚实地宣称全面优于 DeepSeek 或 Perplexity 基线。
+  \item 如果按攻击阶段细看，SP5 在 Tool Misuse 上已经达到最优，SP4 在 AgentPoison 基础场景上也非常接近强基线。
+  \item 当前系统真正的竞争力在于：\textbf{本地、低延迟、可解释、可分阶段部署}；而不是“已经在所有攻击面上取得最高 F1”。
+  \item 这也意味着后续工作的重点应放在 SP3、SP7 以及 SP2/SP6 的误报控制，而不是继续堆叠已经很强的 SP4/SP5。
+\end{enumerate}
+
+\subsection{延迟分析}
+表~\ref{tab:type4-latency} 汇总了系统内部关键操作与三条基线的延迟对比。
+
+\begin{table}[H]
+\centering
+\caption{系统内部节点与三条基线的延迟对比}
+\label{tab:type4-latency}
+\begin{tabular}{l c c c c}
+\toprule
+方法 / 操作 & Mean (ms) & P50 (ms) & P95 (ms) & P99 (ms) \\
+\midrule
+SP1（嵌入异常检测） & 0.5566 & 0.6411 & 0.8396 & 0.8744 \\
+SP2（内容困惑度分析） & 0.0242 & 0.0226 & 0.0273 & 0.0503 \\
+SP4（全库扫描 20 文档） & 2.2085 & 2.2189 & 2.8470 & 3.2675 \\
+Keyword Rule & 0.0497 & 0.0487 & 0.0663 & 0.0861 \\
+Perplexity (n-gram) & 0.0917 & 0.0853 & 0.1525 & 0.2416 \\
+DeepSeek-v4-Flash & 1029.2891 & 1019.0805 & 1259.1510 & 1620.9627 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从延迟角度看，当前系统有两个明显特点：
+\begin{enumerate}[leftmargin=2em]
+  \item 上传期和检索期的本地节点大多维持在毫秒级甚至亚毫秒级，适合在线防御；
+  \item DeepSeek 基线虽然整体分类性能强，但其秒级延迟决定了它更适合作为离线审计器，而不是高频在线防御主路径。
+\end{enumerate}
+
+\section{讨论与局限性}
+
+\subsection{为什么这份报告不直接宣称“Config-5 全面最优”}
+与类型三不同，类型四当前测试结果不支持“给出一个统一总指标，然后直接宣布 Config-5 胜出”的写法，原因有三：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{评测粒度不同。} 单节点消融是面向特定攻击阶段的定向实验，而基线评估是统一 200 文档整体分类实验。
+  \item \textbf{配置实验偏上传阶段。} 当前 Config-1 $\sim$ Config-5 覆盖实验主要使用上传入口，因此 RE\-TRIE\-VAL-only 配置天然不会触发告警。
+  \item \textbf{节点能力差异很大。} SP4/SP5 已很强，但 SP3/SP7 仍然薄弱，把它们简单平均成一个“总分”会掩盖真正的问题位置。
+\end{enumerate}
+
+因此，本报告选择更审慎也更清晰的表述方式：\textbf{系统已经具备完整链路和若干强节点，但还没有在统一口径下证明自己是全面最优的总防御器。}
+
+\subsection{部署建议}
+结合现有结果，较合理的部署建议如下：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{若目标是在线上传防护：} 优先使用 Config-1 或 Config-3，在低延迟条件下获得较强的上传期预警能力。
+  \item \textbf{若目标是运行时检索安全：} 单独部署 Config-4，让 SP5 与 SP6 专注检索阶段的鲁棒聚合与一致性过滤。
+  \item \textbf{若目标是比赛展示或体系完整性：} 使用 Config-5，因为它最能体现“上传、索引、检索三段闭环”的纵深防御思想。
+  \item \textbf{若目标是离线高精度审计：} 可将本地 SP 节点与 DeepSeek 类 LLM 审计器叠加使用，让前者做低延迟筛查、后者做高成本复核。
+\end{enumerate}
+
+\subsection{当前局限性}
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{SP3 与 SP7 尚未有效解决语义碎片化。} 这不仅是指标短板，也是当前类型四系统最需要补强的技术点。
+  \item \textbf{SP2 与 SP6 误报较高。} 它们更像高召回筛查器，而不是开箱即用的低误伤阻断器。
+  \item \textbf{Config-3 的脚手架标签曾存在不一致。} 当前实现中其语义应统一为“SP1 + SP2 + SP3 + SP4 的全面上传防护”；本文按实现语义而非早期 Markdown 标签进行整理。
+  \item \textbf{Perplexity 基线在当前数据上表现异常强。} 这说明数据中仍可能存在较明显的分布差异，后续需要更多自然化、弱痕迹、跨语言样本来拉开真实难度。
+  \item \textbf{缺少统一口径的端到端全链路总指标。} 当前报告更像“阶段化剖面图”，而不是“单一总分排行榜”；这会影响与外部基线的直接可比性。
+\end{enumerate}
+
+\section{结论}
+本文围绕类型四“外部/开发者批量写入”攻击实现了一个覆盖上传、分块、索引扫描与检索阶段的多节点防御体系。本文的核心结论可以归纳为三点：
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{类型四的真实危险来自知识库生命周期，而不是单轮对话。} 因此，系统必须同时保护写入前、索引中和检索时三个阶段，才能阻断持久化污染。
+  \item \textbf{当前系统已经拥有若干强节点，但仍未在所有攻击面上均衡成熟。} SP4 与 SP5 表现突出，而 SP3 与 SP7 仍是明显短板。
+  \item \textbf{External\_Developer\_Write 的主要竞争力是本地、低延迟、阶段化、可解释的防御能力。} 这使它非常适合作为比赛作品中的体系化方案与工程化防护框架，但其语义碎片化与统一总评测仍需进一步完善。
+\end{enumerate}
+
+\begin{thebibliography}{99}
+
+\bibitem{poisonedrag2025}
+PoisonedRAG.
+\newblock Knowledge Poisoning Attacks Against Retrieval-Augmented Generation.
+\newblock USENIX Security, 2025.
+
+\bibitem{agentpoison2024}
+AgentPoison.
+\newblock Trigger-Based Retrieval Hijacking for Agent Knowledge Bases.
+\newblock NeurIPS, 2024.
+
+\bibitem{jbb2024}
+JailbreakBench.
+\newblock An Open Robustness Benchmark for Jailbreaking Large Language Models.
+\newblock NeurIPS Datasets and Benchmarks, 2024.
+
+\bibitem{saferag2025}
+SafeRAG.
+\newblock Security Evaluation Benchmarks for Retrieval-Augmented Generation.
+\newblock 2025.
+
+\bibitem{agentdojo}
+AgentDojo.
+\newblock Agent Security Benchmark and Attack Corpus.
+
+\bibitem{gandalf}
+Lakera Gandalf.
+\newblock Prompt Injection and Instruction-Bypass Challenge Corpus.
+
+\end{thebibliography}
+
+\end{document}
