@@ -1,3 +1,5 @@
+.DS_Store
 __pycache__/
-*.pyc
-reflection_audit.jsonl
+*.py[cod]
+MASW/tests/results/*
+!MASW/tests/results/.gitkeep
