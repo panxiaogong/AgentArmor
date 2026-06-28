@@ -389,3 +389,171 @@ class TestAblationExperiments:
         print(f"\n[RQ5] 延迟基准 (毫秒):")
         for name, ms in sorted(latencies.items()):
             print(f"  {name}: {ms:.3f} ms")
+
+
+class TestAblationExperimentsEnhanced:
+    """增强消融实验：新攻击类型检测率评估。
+
+    实验设计:
+      - SP2 vs Prompt Injection (30 条)
+      - SP5 vs Tool Misuse (20 条)
+      - SP6 vs Memory Poisoning (20 条)
+      - SP6 vs Agent Hijacking (20 条)
+      - SP7 vs 跨文档碎片化
+      - Config-5 全攻击类型综合对比
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self, benign_docs, benign_embeddings, extra_benign_docs,
+              prompt_injection_docs, tool_misuse_docs,
+              memory_poisoning_docs, agent_hijacking_docs,
+              enhanced_poisonedrag_docs, mock_models):
+        self.benign_docs = benign_docs
+        self.extra_benign = extra_benign_docs
+        self.benign_embeds = benign_embeddings
+        self.pi_docs = prompt_injection_docs
+        self.tm_docs = tool_misuse_docs
+        self.mp_docs = memory_poisoning_docs
+        self.ah_docs = agent_hijacking_docs
+        self.epr_docs = enhanced_poisonedrag_docs
+        self.mock_embed = mock_models["embed"]
+        self.mock_nli = mock_models["nli"]
+        self.mock_llm = mock_models["llm"]
+
+    # ── RQ6: SP2 vs Prompt Injection ────────────────────────
+
+    def test_rq6_sp2_vs_prompt_injection(self):
+        """SP2 困惑度分析 vs 30 条 Prompt Injection。"""
+        from External_Developer_Write.sp2_content_perplexity import ContentPerplexityAnalyzer
+
+        analyzer = ContentPerplexityAnalyzer(alpha=0.025)
+        analyzer.train_distribution(self.benign_docs[:15])
+
+        results = []
+        for doc in self.benign_docs[15:25]:
+            r = analyzer.analyze(doc)
+            results.append((doc.doc_id, r.is_anomaly, r.anomaly_score))
+        for doc in self.pi_docs:
+            r = analyzer.analyze(doc)
+            results.append((doc.doc_id, r.is_anomaly, r.anomaly_score))
+
+        labels = {d.doc_id: False for d in self.benign_docs[15:25]}
+        labels.update({d.doc_id: True for d in self.pi_docs})
+
+        metrics = compute_metrics(results, labels)
+        print(f"\n[RQ6] SP2 vs Prompt Injection:")
+        print(f"  Precision={metrics['precision']:.4f}, Recall={metrics['recall']:.4f}, "
+              f"F1={metrics['f1']:.4f}, FPR={metrics['fpr']:.4f}")
+        print(f"  TP={metrics['tp']}, FP={metrics['fp']}, TN={metrics['tn']}, FN={metrics['fn']}")
+
+    # ── RQ7: SP5 vs Tool Misuse ─────────────────────────────
+
+    def test_rq7_sp5_vs_tool_misuse(self):
+        """SP5 鲁棒聚合 vs 工具滥用。"""
+        from External_Developer_Write.sp5_robust_aggregation import RobustAggregationRetriever
+
+        retriever = RobustAggregationRetriever(
+            llm_model=self.mock_llm, embed_model=self.mock_embed,
+            num_groups=3, alpha=0.6, enable_abstention=True,
+        )
+
+        # 良性检索结果（正常关键词）
+        benign = [
+            RetrievedDoc(doc_id=f"b{i}",
+                content=f"System status: normal operation unit {i}.",
+                embedding=self.mock_embed(f"normal status {i}"),
+                score=0.9) for i in range(6)
+        ]
+        # 工具滥用
+        tm = [
+            RetrievedDoc(doc_id=f"tm{i}",
+                content=self.tm_docs[i].content[:200],
+                embedding=self.mock_embed(self.tm_docs[i].content[:200]),
+                score=0.85) for i in range(4)
+        ]
+
+        # 场景 1: 少数攻击
+        result_few = retriever.retrieve("system status?", benign + tm[:1])
+        # 场景 2: 等量攻击
+        result_half = retriever.retrieve("system status?", benign[:3] + tm[:3])
+
+        kw_few = result_few.get("robust_keywords", set())
+        kw_half = result_half.get("robust_keywords", set())
+        print(f"\n[RQ7] SP5 vs Tool Misuse:")
+        print(f"  少数攻击关键词: {kw_few}")
+        print(f"  等量攻击关键词: {kw_half}")
+        assert result_few is not None and result_half is not None
+
+    # ── RQ8: SP6 vs Memory Poisoning ────────────────────────
+
+    def test_rq8_sp6_vs_memory_poisoning(self):
+        """SP6 后检索验证 vs 记忆投毒。"""
+        from External_Developer_Write.sp6_post_retrieval_verifier import PostRetrievalVerifier
+
+        verifier = PostRetrievalVerifier(
+            cross_encoder=self.mock_embed,
+            embed_model=self.mock_embed,
+            nli_model=self.mock_nli,
+            trust_threshold=0.4,
+        )
+
+        benign = [
+            RetrievedDoc(doc_id=f"b{i}",
+                content="The Earth orbits the Sun at 149.6 million km distance.",
+                embedding=self.mock_embed("Earth orbit Sun"),
+                score=0.9) for i in range(3)
+        ]
+        poisoned = [
+            RetrievedDoc(doc_id=f"mp{i}",
+                content=self.mp_docs[i].content[:200],
+                embedding=self.mock_embed(self.mp_docs[i].content[:200]),
+                score=0.85) for i in range(3)
+        ]
+
+        trusted, filtered, details = verifier.verify(
+            "What is the distance between Earth and Sun?",
+            benign + poisoned,
+            llm_base_response="The Earth orbits the Sun."
+        )
+
+        mp_filtered = sum(1 for d in filtered if "mp" in d.doc_id)
+        print(f"\n[RQ8] SP6 vs Memory Poisoning: "
+              f"投毒过滤 {mp_filtered}/{len(poisoned)}, "
+              f"信任得分: {details['trust_scores']}")
+
+    # ── RQ9: Config-5 全攻击类型对比 ───────────────────────
+
+    def test_rq9_config5_all_attack_types(self):
+        """Config-5 对所有攻击类型的告警率。"""
+        pipeline = DefensePipeline(
+            config=PipelineConfig.CONFIG_5_MAX,
+            llm_model=self.mock_llm,
+        )
+
+        # 统一训练
+        clean_de = [
+            DocumentEmbedding(doc_id=d.doc_id, vector=v)
+            for d, v in zip(self.benign_docs[:5], self.benign_embeds[:5])
+        ]
+        pipeline.train_sp1(clean_de)
+        pipeline.train_sp2(self.benign_docs[:5])
+
+        # 定义攻击测试集
+        attack_sets = {
+            "PoisonedRAG": self.benign_docs[:3],
+            "Enhanced_PR": self.epr_docs[:3],
+            "Prompt_Injection": self.pi_docs[:5],
+            "Tool_Misuse": self.tm_docs[:5],
+            "Memory_Poisoning": self.mp_docs[:5],
+            "Agent_Hijacking": self.ah_docs[:5],
+        }
+
+        print(f"\n[RQ9] Config-5 全攻击类型对比:")
+        for atype, docs in attack_sets.items():
+            alerted = 0
+            for doc in docs:
+                result = pipeline.upload_document(doc, doc_embedding=[0.0]*10)
+                if result.get("alerts"):
+                    alerted += 1
+            rate = alerted / len(docs)
+            print(f"  {atype}: {alerted}/{len(docs)} 告警 ({rate:.0%})")

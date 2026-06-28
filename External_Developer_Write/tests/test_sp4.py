@@ -188,3 +188,147 @@ class TestTriggerRegionDetector:
         ref = [[0.0] * 5]
         result = self.detector.detect_single([1.0] * 5, ref)
         assert not result.is_anomaly
+
+
+class TestTriggerRegionDetectorEnhanced:
+    """SP4 增强测试：更多触发词 + 多触发词共存。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.detector = TriggerRegionDetector(
+            knn_k=10, nnr_threshold=0.7, lof_threshold=1.5,
+            anomaly_score_threshold=0.7, use_clustering=True,
+            dbscan_eps=0.5, dbscan_min_samples=3,
+            weight_lof=0.4, weight_nnr=0.4, weight_compactness=0.2,
+        )
+
+    # ── 测试 1: 多触发词共存检测 ───────────────────────────
+
+    def test_multi_trigger_coexistence(self):
+        """多个 AgentPoison 触发词共存时，所有紧凑簇应被检测。"""
+        dim = 5
+        bg = [[random.gauss(0, 1.0) for _ in range(dim)] for _ in range(80)]
+
+        # 三个不同中心的攻击簇（每簇 > knn_k，确保 kNN 全在簇内）
+        centers = [
+            [3.0, 3.0, 3.0, 3.0, 3.0],   # 远离背景
+            [-3.0, -3.0, -3.0, -3.0, -3.0],
+            [4.0, -4.0, 4.0, -4.0, 4.0],
+        ]
+        all_attack = []
+        for center in centers:
+            cluster = [
+                [center[d] + random.gauss(0, 0.05) for d in range(dim)]
+                for _ in range(15)  # > knn_k=10 → kNN 全为内部点
+            ]
+            all_attack.extend(cluster)
+
+        all_vecs = bg + all_attack
+        doc_embeds = [
+            DocumentEmbedding(doc_id=f"d_{i}", vector=v)
+            for i, v in enumerate(all_vecs)
+        ]
+
+        results = self.detector.scan(doc_embeds)
+
+        # 统计每个簇的检出
+        attack_detected = sum(
+            1 for i, r in enumerate(results)
+            if i >= 80 and r.is_anomaly
+        )
+        bg_fp = sum(
+            1 for i, r in enumerate(results)
+            if i < 80 and r.is_anomaly
+        )
+
+        # 打印每个攻击簇的 NNR
+        for ci, center in enumerate(centers):
+            start = 80 + ci * 15
+            nnrs = [results[start+j].details.get("nnr_score", 1.0) for j in range(5)]
+            scores = [results[start+j].anomaly_score for j in range(5)]
+            print(f"\n  簇 {ci} @ {center[0]}: NNR={[round(x,3) for x in nnrs[:3]]}, "
+                  f"score={[round(x,3) for x in scores[:3]]}")
+
+        print(f"\n多触发词: 攻击检出 {attack_detected}/{len(all_attack)}, "
+              f"良性误报 {bg_fp}/80")
+        assert attack_detected >= 20, f"多触发词检出率过低: {attack_detected}/{len(all_attack)}"
+
+    # ── 测试 2: 跨类型注入区域检测 ─────────────────────────
+
+    def test_cross_type_injection_region(self):
+        """不同类型的攻击嵌入（PoisonedRAG + AgentPoison）应被区分。"""
+        dim = 5
+        bg = [[random.gauss(0, 1.0) for _ in range(dim)] for _ in range(40)]
+
+        # PoisonedRAG: 均值偏移（离群但不紧凑）
+        pr = [[random.gauss(3.0, 1.0) for _ in range(dim)] for _ in range(10)]
+
+        # AgentPoison: 紧凑聚类
+        center = [2.0, 2.0, 2.0, 2.0, 2.0]
+        ap = [[center[d] + random.gauss(0, 0.05) for d in range(dim)] for _ in range(10)]
+
+        all_vecs = bg + pr + ap
+        doc_embeds = [
+            DocumentEmbedding(doc_id=f"d_{i}", vector=v)
+            for i, v in enumerate(all_vecs)
+        ]
+
+        results = self.detector.scan(doc_embeds)
+
+        # AgentPoison 应被高置信度检出（紧凑 + 低NNR）
+        ap_scores = [results[40 + i].anomaly_score for i in range(10)]
+        pr_scores = [results[50 + i].anomaly_score for i in range(10)]
+
+        avg_ap = sum(ap_scores) / len(ap_scores)
+        avg_pr = sum(pr_scores) / len(pr_scores)
+        print(f"\nAgentPoison 平均分: {avg_ap:.4f}, PoisonedRAG 平均分: {avg_pr:.4f}")
+        # AgentPoison 的紧凑性应使检测分更高
+        print(f"  AgentPoison NNR: {[results[40+i].details.get('nnr_score', 0) for i in range(5)]}")
+
+    # ── 测试 3: 触发词浓度梯度 ─────────────────────────────
+
+    def test_trigger_compactness_gradient(self):
+        """紧凑度由高到低的梯度应反映在检测分上。"""
+        dim = 5
+        bg = [[random.gauss(0, 1.0) for _ in range(dim)] for _ in range(30)]
+
+        # 不同紧凑度的攻击簇: std 从 0.01 到 1.0
+        stds = [0.01, 0.05, 0.1, 0.5, 1.0]
+        clusters = []
+        center = [2.0, 2.0, 2.0, 2.0, 2.0]
+        for s in stds:
+            cluster = [
+                [center[d] + random.gauss(0, s) for d in range(dim)]
+                for _ in range(5)
+            ]
+            clusters.append(cluster)
+
+        all_vecs = bg + [v for c in clusters for v in c]
+        doc_embeds = [
+            DocumentEmbedding(doc_id=f"d_{i}", vector=v)
+            for i, v in enumerate(all_vecs)
+        ]
+
+        results = self.detector.scan(doc_embeds)
+
+        print("\n紧凑度梯度:")
+        for idx, s in enumerate(stds):
+            start = 30 + idx * 5
+            scores = [results[start + j].anomaly_score for j in range(5)]
+            nnts = [results[start + j].details.get("nnr_score", 1.0) for j in range(5)]
+            avg_score = sum(scores) / len(scores)
+            avg_nnr = sum(nnts) / len(nnts)
+            print(f"  std={s:.2f}: avg_score={avg_score:.4f}, avg_nnr={avg_nnr:.4f}")
+
+        # 验证 NNR 的单调性：std 越大，NNR 越大（从紧凑到松散）
+        nnr_values = []
+        for idx in range(len(stds)):
+            start = 30 + idx * 5
+            nnts = [results[start + j].details.get("nnr_score", 1.0) for j in range(5)]
+            nnr_values.append(sum(nnts) / len(nnts))
+
+        # NNR 应随 std 增大而单调递增（更不紧凑）
+        for i in range(1, len(nnr_values)):
+            assert nnr_values[i] >= nnr_values[i-1] - 0.1, \
+                f"NNR 应单调递增: idx={i} nnr={nnr_values[i]:.4f} < prev={nnr_values[i-1]:.4f}"
+        print(f"  NNR 单调性验证: {'✓' if all(nnr_values[i] >= nnr_values[i-1] - 0.1 for i in range(1, len(nnr_values))) else '✗'}")
