@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+<path d="M0,0 L8,3 L0,6 Z" fill="#222222"/>
+</marker>
+<style>
+.title{font-family:Arial,Helvetica,sans-serif;font-size:32px;font-weight:700;fill:#1F2933}
+.subtitle{font-family:Arial,Helvetica,sans-serif;font-size:17px;fill:#667085}
+.panel{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:700;fill:#1F2933}
+.label{font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;fill:#1F2933}
+.small{font-family:Arial,Helvetica,sans-serif;font-size:13.5px;fill:#344054}
+.tiny{font-family:Arial,Helvetica,sans-serif;font-size:12px;fill:#475467}
+.axis{stroke:#D0D5DD;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.45;fill:none;marker-end:url(#arrow)}
+.softline{stroke:#475467;stroke-width:1.2;fill:none;stroke-dasharray:7 5;marker-end:url(#arrow)}
+.dash{stroke:#667085;stroke-width:1.2;fill:none;stroke-dasharray:7 5}
+.op{fill:#FFFFFF;stroke:#222222;stroke-width:1.3}
+</style>
+</defs>
+<rect width="1600" height="900" fill="#FFFFFF"/>
+<text x="64" y="58" class="title">D3 Hybrid Risk Filter</text>
+<text x="64" y="88" class="subtitle">Rule precision plus semantic recall for early-stage screening</text>
+<rect x="80" y="360" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="98" y="367" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="116" y="374" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="134" y="381" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="152" y="388" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<text x="110" y="476" class="label">CandidateFact</text>
+<rect x="360" y="220" width="250" height="135" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="258" class="label">RuleBasedDetector</text>
+<text x="378" y="288" class="tiny">override patterns</text>
+<text x="378" y="310" class="tiny">tool commands</text>
+<text x="378" y="332" class="tiny">policy-memory terms</text>
+<rect x="360" y="505" width="250" height="135" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="543" class="label">RubricDetector</text>
+<text x="378" y="573" class="tiny">role semantics</text>
+<text x="378" y="595" class="tiny">future-agent control</text>
+<text x="378" y="617" class="tiny">external sink</text>
+<circle cx="725" cy="430" r="18" class="op"/><text x="719" y="436" class="label">max</text>
+<rect x="835" y="365" width="220" height="130" rx="12" fill="#EFF2F5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="853" y="403" class="label">Hybrid Score</text>
+<text x="853" y="433" class="tiny">R = max(rule, rubric)</text>
+<text x="853" y="455" class="tiny">tau_write = 0.45</text>
+<circle cx="1145" cy="430" r="18" class="op"/><text x="1139" y="436" class="label">&gt;</text>
+<rect x="1240" y="260" width="220" height="105" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1258" y="298" class="label">Block</text>
+<text x="1258" y="328" class="tiny">quarantine</text>
+<text x="1258" y="350" class="tiny">audit reason</text>
+<rect x="1240" y="500" width="220" height="105" rx="12" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1258" y="538" class="label">Pass</text>
+<text x="1258" y="568" class="tiny">forward to D4</text>
+<text x="1258" y="590" class="tiny">retain provenance</text>
+<path d="M250 430 L310 430 L310 288 L360 288" class="line"/>
+<path d="M250 430 L310 430 L310 573 L360 573" class="line"/>
+<path d="M610 288 L670 288 L670 430 L707 430" class="line"/>
+<path d="M610 573 L670 573 L670 430 L707 430" class="line"/>
+<path d="M743 430 H835" class="line"/>
+<path d="M1055 430 H1127" class="line"/>
+<path d="M1163 430 L1200 430 L1200 312 L1240 312" class="line"/>
+<path d="M1163 430 L1200 430 L1200 552 L1240 552" class="line"/>
+<rect x="930" y="660" width="430" height="82" rx="12" fill="#EFF2F5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="948" y="698" class="label">Selection Result</text>
+<text x="948" y="728" class="tiny">D3_RULE recall = 0.8889 </text>
+<text x="948" y="750" class="tiny"> D3_HYBRID recall = 1.0000</text>
+<rect x="64" y="812" width="1472" height="52" rx="12" fill="#EFF2F5" stroke="#D0D5DD" stroke-width="1"/>
+<text x="96" y="845" class="label">Legend</text>
+<rect x="226" y="827" width="36" height="20" rx="6" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1"/>
+<text x="274" y="843" class="tiny">rule features</text>
+<rect x="456" y="827" width="36" height="20" rx="6" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1"/>
+<text x="504" y="843" class="tiny">semantic rubric</text>
+<rect x="686" y="827" width="36" height="20" rx="6" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1"/>
+<text x="734" y="843" class="tiny">candidate tensor</text>
+</svg>

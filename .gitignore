@@ -4,3 +4,21 @@ __pycache__/
 MASW/tests/results/*
 !MASW/tests/results/.gitkeep
 .env
+
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.xdv
+*.synctex.gz
+missfont.log
+fonttest.*
+
+# Render/review scratch images
+tmp_pdf_render*/
+tmp_pdf_review*/
+multi_agent_shared_write_named/tmp_pdf_render*/
+multi_agent_shared_write_named/tmp_pdf_review*/

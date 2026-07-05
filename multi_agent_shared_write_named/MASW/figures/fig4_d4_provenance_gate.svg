@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+<path d="M0,0 L8,3 L0,6 Z" fill="#222222"/>
+</marker>
+<style>
+.title{font-family:Arial,Helvetica,sans-serif;font-size:32px;font-weight:700;fill:#1F2933}
+.subtitle{font-family:Arial,Helvetica,sans-serif;font-size:17px;fill:#667085}
+.panel{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:700;fill:#1F2933}
+.label{font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;fill:#1F2933}
+.small{font-family:Arial,Helvetica,sans-serif;font-size:13.5px;fill:#344054}
+.tiny{font-family:Arial,Helvetica,sans-serif;font-size:12px;fill:#475467}
+.axis{stroke:#D0D5DD;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.45;fill:none;marker-end:url(#arrow)}
+.softline{stroke:#475467;stroke-width:1.2;fill:none;stroke-dasharray:7 5;marker-end:url(#arrow)}
+.dash{stroke:#667085;stroke-width:1.2;fill:none;stroke-dasharray:7 5}
+.op{fill:#FFFFFF;stroke:#222222;stroke-width:1.3}
+</style>
+</defs>
+<rect width="1600" height="900" fill="#FFFFFF"/>
+<text x="64" y="58" class="title">D4 Provenance Gate</text>
+<text x="64" y="88" class="subtitle">Trust promotion requires evidence, source reputation, conflict checks, and low risk</text>
+<rect x="80" y="360" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="98" y="367" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="116" y="374" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="134" y="381" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="152" y="388" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<text x="110" y="476" class="label">Candidate</text>
+<rect x="360" y="190" width="230" height="85" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="228" class="label">Evidence</text>
+<text x="378" y="258" class="tiny">evidence_ok(c)</text>
+<path d="M250 430 L315 430 L315 232 L360 232" class="line"/>
+<path d="M590 232 L670 232 L670 430 L710 430" class="line"/>
+<rect x="360" y="320" width="230" height="85" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="358" class="label">Source</text>
+<text x="378" y="388" class="tiny">rep(src) &gt;= rho_min</text>
+<path d="M250 430 L315 430 L315 362 L360 362" class="line"/>
+<path d="M590 362 L670 362 L670 430 L710 430" class="line"/>
+<rect x="360" y="450" width="230" height="85" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="488" class="label">Conflict</text>
+<text x="378" y="518" class="tiny">conflict_free(c)</text>
+<path d="M250 430 L315 430 L315 492 L360 492" class="line"/>
+<path d="M590 492 L670 492 L670 430 L710 430" class="line"/>
+<rect x="360" y="580" width="230" height="85" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="618" class="label">Risk</text>
+<text x="378" y="648" class="tiny">risk(c) &lt;= tau_verify</text>
+<path d="M250 430 L315 430 L315 622 L360 622" class="line"/>
+<path d="M590 622 L670 622 L670 430 L710 430" class="line"/>
+<circle cx="735" cy="430" r="18" class="op"/><text x="729" y="436" class="label">AND</text>
+<rect x="850" y="350" width="290" height="155" rx="12" fill="#EFF2F5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="868" y="388" class="label">verify(c)</text>
+<text x="868" y="418" class="tiny">evidence_ok AND source_ok</text>
+<text x="868" y="440" class="tiny">AND conflict_free</text>
+<text x="868" y="462" class="tiny">AND risk &lt;= tau_verify</text>
+<rect x="1260" y="230" width="220" height="105" rx="12" fill="#F5F1E8" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1278" y="268" class="label">Verified Memory</text>
+<text x="1278" y="298" class="tiny">trust = VERIFIED</text>
+<text x="1278" y="320" class="tiny">taint = false</text>
+<rect x="1260" y="540" width="220" height="105" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1278" y="578" class="label">Quarantine</text>
+<text x="1278" y="608" class="tiny">reason + provenance</text>
+<text x="1278" y="630" class="tiny">no retrieval</text>
+<path d="M753 430 H850" class="line"/>
+<path d="M1140 405 L1205 405 L1205 282 L1260 282" class="line"/>
+<path d="M1140 470 L1205 470 L1205 592 L1260 592" class="line"/>
+<rect x="80" y="650" width="390" height="82" rx="12" fill="#EFF2F5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="98" y="688" class="label">Belief Score</text>
+<text x="98" y="718" class="tiny">0.50 trust + 0.30 evidence + 0.20 source reputation</text>
+<rect x="850" y="650" width="440" height="82" rx="12" fill="#EFF2F5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="868" y="688" class="label">Node-Aware Placement</text>
+<text x="868" y="718" class="tiny">D4 uses RuleBasedDetector; D4 hybrid FPR = 0.0364</text>
+</svg>

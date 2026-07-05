@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-07-03T03:27:27.987129+00:00",
+  "seed": 20260703,
+  "outputs": {
+    "e2e": "results/e2e/",
+    "type4": "results/type4/",
+    "type5": "results/type5/",
+    "ablation": "results/ablation/",
+    "performance": "results/performance/",
+    "benign": "results/benign/"
+  }
+}

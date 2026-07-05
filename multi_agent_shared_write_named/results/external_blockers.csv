@@ -1,0 +1,9 @@
+experiment,required_for,status,block_reason
+external_framework_langchain,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+external_framework_llama_index,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+external_framework_autogen,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+external_framework_crewai,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+external_framework_chromadb,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+external_framework_faiss,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+external_framework_qdrant_client,optional real framework/vector DB integration,blocked,Python package import failed: ModuleNotFoundError; network is restricted so dependency install was not attempted
+DeepSeek remote LLM baseline,LLM-only judge latency and quality baseline,blocked,DEEPSEEK_API_KEY and MASW_RUN_REMOTE_BASELINES=1 were not both present; remote API call not executed

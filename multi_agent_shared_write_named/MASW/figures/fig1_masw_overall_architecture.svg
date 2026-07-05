@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+<path d="M0,0 L8,3 L0,6 Z" fill="#222222"/>
+</marker>
+<style>
+.title{font-family:Arial,Helvetica,sans-serif;font-size:32px;font-weight:700;fill:#1F2933}
+.subtitle{font-family:Arial,Helvetica,sans-serif;font-size:17px;fill:#667085}
+.panel{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:700;fill:#1F2933}
+.label{font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;fill:#1F2933}
+.small{font-family:Arial,Helvetica,sans-serif;font-size:13.5px;fill:#344054}
+.tiny{font-family:Arial,Helvetica,sans-serif;font-size:12px;fill:#475467}
+.axis{stroke:#D0D5DD;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.45;fill:none;marker-end:url(#arrow)}
+.softline{stroke:#475467;stroke-width:1.2;fill:none;stroke-dasharray:7 5;marker-end:url(#arrow)}
+.dash{stroke:#667085;stroke-width:1.2;fill:none;stroke-dasharray:7 5}
+.op{fill:#FFFFFF;stroke:#222222;stroke-width:1.3}
+</style>
+</defs>
+<rect width="1600" height="900" fill="#FFFFFF"/>
+<text x="64" y="58" class="title">MASW Defense Architecture</text>
+<text x="64" y="88" class="subtitle">Provenance-aware shared-memory pipeline with mediated execution</text>
+<text x="64" y="138" class="panel">A. Secure write path</text>
+<rect x="72" y="225" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="90" y="232" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="108" y="239" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="126" y="246" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<rect x="144" y="253" width="140" height="72" rx="8" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.0"/>
+<text x="102" y="341" class="label">External Data</text>
+<rect x="300" y="245" width="150" height="108" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="318" y="283" class="label">D1 Input Label</text>
+<text x="318" y="313" class="tiny">trust=UNTRUSTED</text>
+<text x="318" y="335" class="tiny">taint=true</text>
+<rect x="480" y="245" width="150" height="108" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="498" y="283" class="label">D2 Candidate</text>
+<text x="498" y="313" class="tiny">fact extraction</text>
+<text x="498" y="335" class="tiny">no direct write</text>
+<rect x="660" y="245" width="150" height="108" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="678" y="283" class="label">D3 Risk Filter</text>
+<text x="678" y="313" class="tiny">hybrid detector</text>
+<text x="678" y="335" class="tiny">early screening</text>
+<rect x="840" y="245" width="175" height="108" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="858" y="283" class="label">D4 Provenance Gate</text>
+<text x="858" y="313" class="tiny">verify before promote</text>
+<text x="858" y="335" class="tiny">single write gate</text>
+<rect x="1050" y="245" width="175" height="108" rx="12" fill="#F5F1E8" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1068" y="283" class="label">Verified Memory</text>
+<text x="1068" y="313" class="tiny">shared state</text>
+<text x="1068" y="335" class="tiny">evidence only</text>
+<path d="M220 290 H300" class="line"/>
+<path d="M450 290 H480" class="line"/>
+<path d="M630 290 H660" class="line"/>
+<path d="M810 290 H840" class="line"/>
+<path d="M1015 290 H1050" class="line"/>
+<text x="64" y="482" class="panel">B. Secure read and action path</text>
+<rect x="1050" y="560" width="175" height="108" rx="12" fill="#F5F1E8" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1068" y="598" class="label">Verified Memory</text>
+<text x="1068" y="628" class="tiny">retrieval source</text>
+<text x="1068" y="650" class="tiny">scoped access</text>
+<rect x="820" y="560" width="170" height="108" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="838" y="598" class="label">D5 Retrieval Audit</text>
+<text x="838" y="628" class="tiny">trust-aware ranking</text>
+<text x="838" y="650" class="tiny">taint filtering</text>
+<rect x="590" y="560" width="170" height="108" rx="12" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="608" y="598" class="label">Agent B Planner</text>
+<text x="608" y="628" class="tiny">proposal only</text>
+<text x="608" y="650" class="tiny">not authorization</text>
+<rect x="360" y="560" width="170" height="108" rx="12" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="378" y="598" class="label">D6 Mediator</text>
+<text x="378" y="628" class="tiny">tool policy</text>
+<text x="378" y="650" class="tiny">context risk</text>
+<rect x="120" y="560" width="170" height="108" rx="12" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="138" y="598" class="label">Tool API</text>
+<text x="138" y="628" class="tiny">email / db / repo</text>
+<text x="138" y="650" class="tiny">dry-run executor</text>
+<path d="M1050 614 H990" class="line"/>
+<path d="M820 614 H760" class="line"/>
+<path d="M590 614 H530" class="line"/>
+<path d="M360 614 H290" class="line"/>
+<rect x="1260" y="245" width="235" height="110" rx="12" fill="#EFF2F5" stroke="#2F3A45" stroke-width="1.25"/>
+<text x="1278" y="283" class="label">Core Invariants</text>
+<text x="1278" y="313" class="tiny">No automatic trust promotion</text>
+<text x="1278" y="335" class="tiny">Memory is evidence</text>
+<text x="1278" y="357" class="tiny">Proposal is not authorization</text>
+<path d="M1172 245 L1172 180 L1260 180 L1260 245" class="softline"/>
+<rect x="64" y="812" width="1472" height="52" rx="12" fill="#EFF2F5" stroke="#D0D5DD" stroke-width="1"/>
+<text x="96" y="845" class="label">Legend</text>
+<rect x="226" y="827" width="36" height="20" rx="6" fill="#D0E0F0" stroke="#2F3A45" stroke-width="1"/>
+<text x="274" y="843" class="tiny">processing node</text>
+<rect x="456" y="827" width="36" height="20" rx="6" fill="#FAD7C5" stroke="#2F3A45" stroke-width="1"/>
+<text x="504" y="843" class="tiny">security gate</text>
+<rect x="686" y="827" width="36" height="20" rx="6" fill="#F5F1E8" stroke="#2F3A45" stroke-width="1"/>
+<text x="734" y="843" class="tiny">memory state</text>
+<rect x="916" y="827" width="36" height="20" rx="6" fill="#DDEFE6" stroke="#2F3A45" stroke-width="1"/>
+<text x="964" y="843" class="tiny">external interface</text>
+</svg>

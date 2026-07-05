@@ -1,0 +1,2 @@
+timestamp,python,platform,gpu,max_rss_kb,user_cpu_seconds,system_cpu_seconds,note
+2026-07-03T03:27:27.773986+00:00,3.12.13,macOS-26.5.1-arm64-arm-64bit,not_detected,43565056,1.11236,1.379484,Measured for local deterministic experiment runner process.

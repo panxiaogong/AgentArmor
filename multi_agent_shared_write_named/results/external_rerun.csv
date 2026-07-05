@@ -1,0 +1,9 @@
+experiment,status,records,top_id,write_ms,query_ms,reason
+langchain_core_vectorstore,completed,2,a1,0.032,0.335,LangChain Core InMemoryVectorStore; no remote LLM.
+llama_index_core_vectorstore,completed,2,d0948605-63c4-4bf0-ad32-54c0ed6a214c,53.324,0.574,LlamaIndex Core VectorStoreIndex with MockEmbedding/MockLLM; no remote LLM.
+autogen_agentchat_runtime,partial,1,tester,,0.103,"Constructed SingleThreadedAgentRuntime, TextMessage and CancellationToken; no model-backed multi-agent run."
+chromadb_persistent_client,completed,3,a1,7.268,2.015,ChromaDB PersistentClient path=/var/folders/vq/_ghp2vzn4pqflj05gnbv8d8m0000gn/T/aa_chroma_cf0orz8j
+faiss_indexflatl2,completed,3,1,0.371,1.658,FAISS IndexFlatL2 distance=0.000
+qdrant_local_memory,completed,2,2,1.552,0.47,QdrantClient(':memory:') label=attack
+crewai_agent_chain,blocked,,,,,ModuleNotFoundError: No module named 'langchain'
+deepseek_remote_llm,blocked,,,,,DEEPSEEK_API_KEY and explicit remote-run switch are not configured; remote API not called.

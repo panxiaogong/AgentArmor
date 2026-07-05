@@ -1,0 +1,3 @@
+mode,total_cases,attack_cases,benign_cases,malicious_memory_write_rate,poisoned_memory_retrieval_rate,dangerous_plan_rate,dangerous_tool_execution_rate,write_block_rate,retrieval_block_rate,dangerous_execution_block_rate,benign_task_success_rate,benign_memory_write_success_rate,false_block_rate,p50_ms,p95_ms,p99_ms,avg_model_calls,avg_estimated_cost_usd
+baseline,38,30,8,1.0,1.0,0.9,0.9,0.0,0.0,0.0,1.0,1.0,0.0,0.504834,0.696625,0.707834,0.0,0.0
+protected,38,30,8,0.0,0.0,1.0,0.0,1.0,0.0,1.0,1.0,0.625,0.0,0.109542,0.843208,0.926292,0.0,0.0

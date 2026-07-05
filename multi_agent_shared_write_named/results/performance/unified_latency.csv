@@ -1,0 +1,14 @@
+method,model_name,local_or_api,gpu,warmup,cache,includes_network_time,includes_embedding,includes_retrieval,includes_log_write,includes_model_call,input_length,concurrency,runs,seed,p50_ms,p95_ms,p99_ms,throughput_req_per_s,token_count,model_calls,cost_usd,status,block_reason
+E2E_BASELINE,none,local,no,no,no,no,no,yes,yes,no,mixed,1,38,20260703,0.504834,0.696625,0.707834,1980.8491504137992,0,0.0,0.0,,
+E2E_PROTECTED,none,local,no,no,no,no,no,yes,yes,no,mixed,1,38,20260703,0.109542,0.843208,0.926292,9128.918588304032,0,0.0,0.0,,
+KEYWORD_BASELINE,none,local,no,no,no,no,no,method-dependent,no,no,type4_docs,1,164,20260703,0.004417,0.0055,0.006333,189319.82236259594,0,0,0.0,,
+PERPLEXITY_BASELINE,none,local,no,no,no,no,no,method-dependent,no,no,type4_docs,1,164,20260703,0.007417,0.009625,0.009959,135859.21009467068,0,0,0.0,,
+LLM_ONLY_DEEPSEEK_REMOTE,deepseek-v4-flash,api,,,,,,,,,,,,,,,,,,,,blocked,DEEPSEEK_API_KEY/MASW_RUN_REMOTE_BASELINES not configured; network/API experiment not executed
+AGENTARMOR_COMPLETE,none,local,no,no,no,no,no,method-dependent,no,no,type4_docs,1,164,20260703,0.005667,0.007875,0.012792,137738.61745702598,0,0,0.0,,
+AGENTARMOR_MINUS_HIDDEN_REGION,none,local,no,no,no,no,no,method-dependent,no,no,type4_docs,1,164,20260703,0.005209,0.006667,0.007125,187108.66906409155,0,0,0.0,,
+AGENTARMOR_MINUS_RETRIEVAL,none,local,no,no,no,no,no,method-dependent,no,no,type4_docs,1,164,20260703,0.004958,0.006416,0.008875,190928.78705502822,0,0,0.0,,
+TYPE5_NO_DEFENSE,none,local,no,no,no,no,no,yes,yes,no,type5_hardset,1,136,20260703,0.42975,,,2229.6999509170905,0,0,0.0,,
+TYPE5_D3_ONLY,none,local,no,no,no,no,no,yes,yes,no,type5_hardset,1,136,20260703,0.491583,,,2067.357580610338,0,0,0.0,,
+TYPE5_D4_ONLY,none,local,no,no,no,no,no,yes,yes,no,type5_hardset,1,136,20260703,0.473833,,,2229.324186110212,0,0,0.0,,
+TYPE5_D3_D4,none,local,no,no,no,no,no,yes,yes,no,type5_hardset,1,136,20260703,0.553709,,,1943.910131205072,0,0,0.0,,
+TYPE5_COMPLETE_AGENTARMOR,none,local,no,no,no,no,no,yes,yes,no,type5_hardset,1,136,20260703,0.615291,,,1702.5075382276787,0,0,0.0,,
