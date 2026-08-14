@@ -18,14 +18,27 @@
           </div>
         </div>
 
-        <div class="toolbar">
-          <label class="scenario-control">
-            <span>演示场景</span>
-            <select id="scenarioSelect" aria-label="选择演示场景"></select>
-          </label>
-          <button id="resetButton" class="button button-secondary" type="button">重置</button>
-          <button id="nextButton" class="button button-primary" type="button">执行下一步</button>
-          <button id="autoButton" class="button button-secondary" type="button">自动播放</button>
+        <div class="toolbar-shell">
+          <div class="mode-switch" aria-label="页面模式">
+            <button id="singleModeButton" class="mode-button is-active" type="button">单案例</button>
+            <button id="batchModeButton" class="mode-button" type="button">批量测试</button>
+          </div>
+          <div id="singleControls" class="toolbar">
+            <label class="scenario-control">
+              <span>演示场景</span>
+              <select id="scenarioSelect" aria-label="选择演示场景"></select>
+            </label>
+            <button id="resetButton" class="button button-secondary" type="button">重置</button>
+            <button id="nextButton" class="button button-primary" type="button">执行下一步</button>
+            <button id="autoButton" class="button button-secondary" type="button">自动播放</button>
+          </div>
+          <div id="batchControls" class="toolbar is-hidden">
+            <label class="scenario-control">
+              <span>测试数据集</span>
+              <select id="batchDatasetSelect" aria-label="选择批量测试数据集"></select>
+            </label>
+            <button id="batchRunButton" class="button button-primary" type="button">开始真实批量测试</button>
+          </div>
         </div>
 
         <div class="run-state">
@@ -37,7 +50,7 @@
         </div>
       </header>
 
-      <main class="main-stage">
+      <main id="singleStage" class="main-stage">
         <section class="scenario-summary" aria-live="polite">
           <div>
             <h2 id="scenarioTitle"></h2>
@@ -90,8 +103,73 @@
           <div id="evidenceContent" class="evidence-content"></div>
         </section>
       </main>
+
+      <main id="batchStage" class="batch-stage is-hidden">
+        <section class="batch-overview">
+          <div class="batch-heading">
+            <div>
+              <h2 id="batchTitle">选择数据集并开始现场复现</h2>
+              <p id="batchSource">报告数据只读；本次结果由项目源码重新计算。</p>
+            </div>
+            <div class="batch-progress-copy">
+              <strong id="batchProgressText">尚未运行</strong>
+              <span id="batchRunMeta">SEED 20260703</span>
+            </div>
+          </div>
+          <div class="batch-progress-track"><div id="batchProgressBar" class="batch-progress-bar"></div></div>
+          <div id="batchMetrics" class="batch-metrics">
+            <div class="batch-empty">运行后显示现场结果、报告参照和差值</div>
+          </div>
+        </section>
+
+        <section class="batch-workspace">
+          <article class="results-panel">
+            <header class="results-toolbar">
+              <div>
+                <strong>测试数据</strong>
+                <span id="batchRowCount">0 条</span>
+              </div>
+              <div class="result-filters">
+                <select id="labelFilter" aria-label="按标签筛选">
+                  <option value="all">全部标签</option>
+                  <option value="attack">攻击</option>
+                  <option value="benign">良性</option>
+                </select>
+                <select id="outcomeFilter" aria-label="按结果筛选">
+                  <option value="all">全部结果</option>
+                  <option value="errors">仅看漏报/误报</option>
+                  <option value="blocked">仅看已阻断</option>
+                </select>
+                <input id="caseSearch" type="search" placeholder="搜索编号或类别" aria-label="搜索测试样本" />
+              </div>
+            </header>
+            <div class="results-table-wrap">
+              <table class="results-table">
+                <thead><tr><th>样本编号</th><th>标签</th><th>攻击类型</th><th>无防护</th><th>AgentArmor</th><th>阻断阶段</th><th>耗时</th></tr></thead>
+                <tbody id="batchTableBody"><tr><td colspan="7" class="table-empty">请先运行一组真实测试</td></tr></tbody>
+              </table>
+            </div>
+            <footer class="pagination">
+              <button id="previousPage" class="button button-secondary" type="button">上一页</button>
+              <span id="pageIndicator">0 / 0</span>
+              <button id="nextPage" class="button button-secondary" type="button">下一页</button>
+            </footer>
+          </article>
+
+          <aside class="case-detail">
+            <header>
+              <div><span>样本证据</span><h3 id="detailCaseId">尚未选择样本</h3></div>
+              <strong id="detailOutcome">—</strong>
+            </header>
+            <div id="caseDetailContent" class="case-detail-content">
+              <div class="empty-state">运行测试后点击表格中的任意一条</div>
+            </div>
+          </aside>
+        </section>
+      </main>
     </div>
 
     <script type="module" src="./app.js"></script>
+    <script type="module" src="./batch.js"></script>
   </body>
 </html>

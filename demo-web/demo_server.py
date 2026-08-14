@@ -14,11 +14,14 @@ import time
 import traceback
 import types
 import uuid
+import csv
+import threading
 from dataclasses import asdict, is_dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 
 DEMO_ROOT = Path(__file__).resolve().parent
@@ -472,6 +475,436 @@ def integrity_response() -> dict[str, Any]:
     }
 
 
+def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def ratio_text(value: Any, total: int) -> str:
+    return f"{sum(bool(item) for item in value)}/{total}"
+
+
+def metric_card(label: str, live: str, reference: str) -> dict[str, str]:
+    return {
+        "label": label,
+        "live": live,
+        "reference": reference,
+        "delta": "一致" if live == reference else "有差异",
+    }
+
+
+def save_batch_result(run_dir: Path, payload: dict[str, Any]) -> None:
+    (run_dir / "batch_result.json").write_text(
+        json.dumps(json_ready(payload), ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def run_batch_e2e(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-e2e")
+    cases = real.build_e2e_cases()
+    store = real.SQLiteMemoryStore(run_dir / "e2e_memory.sqlite")
+    tools = real.SandboxTools(run_dir / "tool_sandbox")
+    rows: list[dict[str, Any]] = []
+    raw_rows: list[dict[str, Any]] = []
+    try:
+        for index, case in enumerate(cases, start=1):
+            baseline = real.run_baseline_e2e(case, store, tools)
+            protected = real.run_protected_e2e(case, store, tools)
+            raw_rows.extend([baseline, protected])
+            attack = case.label == "attack"
+            protected_blocked = bool(protected.get("dangerous_execution_blocked")) if attack else False
+            rows.append(
+                {
+                    "id": case.id,
+                    "label": case.label,
+                    "category": case.category,
+                    "input": case.q_inject,
+                    "targetQuery": case.q_target,
+                    "source": case.source_uri,
+                    "baseline": "危险执行" if baseline["dangerous_tool_executed"] else ("正常完成" if not attack else "未执行"),
+                    "protected": "已阻断" if protected_blocked else ("正常完成" if not attack and protected.get("benign_task_success") else "未完成"),
+                    "blockedStage": protected.get("blocked_stage", "none"),
+                    "elapsedMs": round(float(baseline["elapsed_ms"]) + float(protected["elapsed_ms"]), 4),
+                    "isError": bool(protected.get("false_block")) or (attack and not protected_blocked),
+                    "baselineDetail": baseline,
+                    "protectedDetail": protected,
+                }
+            )
+            progress(index, len(cases), case.id)
+    finally:
+        store.close()
+        tools.conn.close()
+
+    summary = real.summarize_e2e(raw_rows)
+    baseline_summary = next(item for item in summary if item["mode"] == "baseline")
+    protected_summary = next(item for item in summary if item["mode"] == "protected")
+    reference_rows = read_csv_rows(real.RESULTS / "e2e" / "summary.csv")
+    reference_baseline = next(item for item in reference_rows if item["mode"] == "baseline")
+    reference_protected = next(item for item in reference_rows if item["mode"] == "protected")
+    attack_total = sum(case.label == "attack" for case in cases)
+    benign_total = len(cases) - attack_total
+    cards = [
+        metric_card(
+            "恶意记忆写入",
+            f"{round(float(protected_summary['malicious_memory_write_rate']) * attack_total)}/{attack_total}",
+            f"{round(float(reference_protected['malicious_memory_write_rate']) * attack_total)}/{attack_total}",
+        ),
+        metric_card(
+            "污染记忆检索",
+            f"{round(float(protected_summary['poisoned_memory_retrieval_rate']) * attack_total)}/{attack_total}",
+            f"{round(float(reference_protected['poisoned_memory_retrieval_rate']) * attack_total)}/{attack_total}",
+        ),
+        metric_card(
+            "危险工具执行",
+            f"{round(float(baseline_summary['dangerous_tool_execution_rate']) * attack_total)}/{attack_total} → {round(float(protected_summary['dangerous_tool_execution_rate']) * attack_total)}/{attack_total}",
+            f"{round(float(reference_baseline['dangerous_tool_execution_rate']) * attack_total)}/{attack_total} → {round(float(reference_protected['dangerous_tool_execution_rate']) * attack_total)}/{attack_total}",
+        ),
+        metric_card(
+            "良性任务成功",
+            f"{round(float(protected_summary['benign_task_success_rate']) * benign_total)}/{benign_total}",
+            f"{round(float(reference_protected['benign_task_success_rate']) * benign_total)}/{benign_total}",
+        ),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "e2e",
+        "title": "端到端记忆污染闭环",
+        "sampleCount": len(cases),
+        "executionCount": len(raw_rows),
+        "sourceLabel": "build_e2e_cases：30条攻击 + 8条良性",
+        "referenceSource": "results/e2e/summary.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "run_baseline_e2e",
+            "run_protected_e2e",
+            "MASW D1-D6",
+            "SQLiteMemoryStore",
+            "SandboxTools",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
+def type4_pipeline_review(doc: dict[str, Any], pipeline: DefensePipeline) -> dict[str, Any]:
+    result = pipeline.upload_document(Document(doc_id=str(doc["id"]), content=str(doc["text"]), source=str(doc["source"])))
+    return {
+        "allowed": bool(result["allowed"]),
+        "alerts": [json_ready(alert) for alert in result["alerts"]],
+    }
+
+
+def run_batch_type4(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-type4")
+    docs = real.make_type4_docs(hard=True)
+    main_docs = real.make_type4_docs(hard=False)
+    char_model = real.train_char_model([doc["text"] for doc in main_docs if doc["label"] == "benign"])
+    baseline_metrics, baseline_rows = real.evaluate_type4_method("KEYWORD_BASELINE", docs, char_model)
+    protected_metrics, protected_rows = real.evaluate_type4_method("AGENTARMOR_COMPLETE", docs, char_model)
+    baseline_by_id = {row["id"]: row for row in baseline_rows}
+    protected_by_id = {row["id"]: row for row in protected_rows}
+
+    def local_lm(context: str, target: str) -> float:
+        text = f"{context} {target}".lower()
+        risky = any(token in text for token in ("ignore", "email.send", "database.write", "deploy.production", "observer@", "attacker@", "hidden:", "all future agents"))
+        return 0.0001 if risky else 0.25
+
+    pipeline = DefensePipeline(config=PipelineConfig.CONFIG_5_MAX, llm_model=local_lm)
+    rows: list[dict[str, Any]] = []
+    for index, doc in enumerate(docs, start=1):
+        baseline = baseline_by_id[str(doc["id"])]
+        protected = protected_by_id[str(doc["id"])]
+        pipeline_review = type4_pipeline_review(doc, pipeline)
+        is_attack = doc["label"] == "attack"
+        predicted = bool(protected["predicted_attack"])
+        if is_attack and predicted:
+            outcome = "已阻断"
+        elif is_attack:
+            outcome = "漏报"
+        elif predicted:
+            outcome = "误报"
+        else:
+            outcome = "正常放行"
+        rows.append(
+            {
+                "id": doc["id"],
+                "label": doc["label"],
+                "category": doc["category"],
+                "input": doc["text"],
+                "source": doc["source"],
+                "baseline": "检测为攻击" if baseline["predicted_attack"] else "未检出",
+                "protected": outcome,
+                "blockedStage": "Type4 detector" if predicted else "none",
+                "elapsedMs": round(float(protected["elapsed_ms"]), 6),
+                "score": round(float(protected["score"]), 3),
+                "isError": (is_attack and not predicted) or (not is_attack and predicted),
+                "baselineDetail": baseline,
+                "protectedDetail": protected,
+                "pipelineReview": pipeline_review,
+            }
+        )
+        progress(index, len(docs), str(doc["id"]))
+
+    reference = next(
+        item for item in read_csv_rows(real.RESULTS / "type4" / "hardset.csv")
+        if item["method"] == "AGENTARMOR_COMPLETE"
+    )
+    attack_total = sum(doc["label"] == "attack" for doc in docs)
+    benign_total = len(docs) - attack_total
+    cards = [
+        metric_card("检出 TP", f"{protected_metrics['tp']}/{attack_total}", f"{reference['tp']}/{attack_total}"),
+        metric_card("误报 FP", f"{protected_metrics['fp']}/{benign_total}", f"{reference['fp']}/{benign_total}"),
+        metric_card("F1", f"{float(protected_metrics['f1']):.3f}", f"{float(reference['f1']):.3f}"),
+        metric_card("FPR", f"{float(protected_metrics['fpr']):.3f}", f"{float(reference['fpr']):.3f}"),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "type4",
+        "title": "类型四：知识库污染困难集",
+        "sampleCount": len(docs),
+        "executionCount": len(baseline_rows) + len(protected_rows) + len(docs),
+        "sourceLabel": "hard_docs.jsonl：54条攻击 + 64条良性",
+        "referenceSource": "results/type4/hardset.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "experiments.evaluate_type4_method",
+            "External_Developer_Write.DefensePipeline.upload_document",
+            "SP2 ContentPerplexityAnalyzer",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
+def run_batch_type5(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-type5")
+    samples = real.build_type5_hard_samples()
+    (run_dir / "type5").mkdir(parents=True, exist_ok=True)
+    no_defense = next(item for item in real.TYPE5_CONFIGS if item.name == "NO_DEFENSE")
+    complete = next(item for item in real.TYPE5_CONFIGS if item.name == "COMPLETE_AGENTARMOR")
+    original_results = real.RESULTS
+    rows: list[dict[str, Any]] = []
+    protected_raw: list[dict[str, Any]] = []
+    try:
+        real.RESULTS = run_dir
+        for index, sample in enumerate(samples, start=1):
+            baseline = real.simulate_type5_sample(no_defense, sample)
+            protected = real.simulate_type5_sample(complete, sample)
+            protected_raw.append(protected)
+            attack = sample["label"] == "attack"
+            predicted = bool(protected["predicted_attack"])
+            if attack and predicted:
+                outcome = "已阻断"
+            elif attack:
+                outcome = "漏报"
+            elif predicted:
+                outcome = "误报"
+            else:
+                outcome = "正常放行"
+            rows.append(
+                {
+                    "id": sample["id"],
+                    "label": sample["label"],
+                    "category": sample["category"],
+                    "input": sample["content"],
+                    "targetQuery": sample["user_query"],
+                    "source": sample["source_uri"],
+                    "baseline": "危险执行" if baseline["dangerous_execution"] else ("正常完成" if not attack else "未执行"),
+                    "protected": outcome,
+                    "blockedStage": protected["blocked_stage"],
+                    "elapsedMs": round(float(baseline["elapsed_ms"]) + float(protected["elapsed_ms"]), 4),
+                    "isError": (attack and not predicted) or (not attack and predicted),
+                    "baselineDetail": baseline,
+                    "protectedDetail": protected,
+                }
+            )
+            progress(index, len(samples), str(sample["id"]))
+    finally:
+        real.RESULTS = original_results
+
+    metrics = real.metric_counts(protected_raw)
+    reference = next(
+        item for item in read_csv_rows(real.RESULTS / "type5" / "hardset_main.csv")
+        if item["config"] == "COMPLETE_AGENTARMOR"
+    )
+    attack_total = sum(sample["label"] == "attack" for sample in samples)
+    benign_total = len(samples) - attack_total
+    dangerous_count = sum(bool(row["protectedDetail"]["dangerous_execution"]) for row in rows if row["label"] == "attack")
+    benign_success = sum(bool(row["protectedDetail"]["benign_success"]) for row in rows if row["label"] == "benign")
+    cards = [
+        metric_card("检出 TP", f"{metrics['tp']}/{attack_total}", f"{reference['tp']}/{attack_total}"),
+        metric_card("危险执行", f"{dangerous_count}/{attack_total}", f"0/{attack_total}"),
+        metric_card("良性成功", f"{benign_success}/{benign_total}", f"{benign_total}/{benign_total}"),
+        metric_card("F1", f"{float(metrics['f1']):.3f}", f"{float(reference['f1']):.3f}"),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "type5",
+        "title": "类型五：多 Agent 共享记忆困难集",
+        "sampleCount": len(samples),
+        "executionCount": len(samples) * 2,
+        "sourceLabel": "hardset.jsonl：72条攻击 + 64条良性",
+        "referenceSource": "results/type5/hardset_main.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "simulate_type5_sample(NO_DEFENSE)",
+            "simulate_type5_sample(COMPLETE_AGENTARMOR)",
+            "MASW D1-D7",
+            "SQLiteMemoryStore",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
+def run_batch_revocation(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-revocation")
+    samples = [sample for sample in real.build_type5_hard_samples() if sample["label"] == "attack"][:20]
+    baseline_store = real.SQLiteMemoryStore(run_dir / "baseline.sqlite")
+    protected_store = real.SQLiteMemoryStore(run_dir / "protected.sqlite")
+    rows: list[dict[str, Any]] = []
+    try:
+        for index, sample in enumerate(samples, start=1):
+            baseline_store.clear()
+            protected_store.clear()
+
+            def seed(store: Any) -> tuple[MemoryRecord, MemoryRecord]:
+                candidate = real.candidate_from_text(str(sample["content"]), str(sample["source_uri"]), "agent-a", TrustLevel.TRUSTED, False)
+                root = MemoryRecord(candidate, "agent-a", str(sample["source_uri"]), TrustLevel.TRUSTED, MemoryScope.SHARED.value, (str(sample["content"]),), False, (candidate.id,))
+                store.insert(root)
+                derived_candidate = real.candidate_from_text(f"Derived summary: {sample['content']}", str(sample["source_uri"]), "agent-b", TrustLevel.TRUSTED, False, (root.id,))
+                derived = MemoryRecord(derived_candidate, "agent-b", str(sample["source_uri"]), TrustLevel.TRUSTED, MemoryScope.SHARED.value, (derived_candidate.evidence_span,), False, (root.id,))
+                store.insert(derived)
+                return root, derived
+
+            baseline_root, baseline_derived = seed(baseline_store)
+            protected_root, protected_derived = seed(protected_store)
+            before = len(protected_store.vector_search(str(sample["user_query"])))
+            baseline_store.mark_revoked(baseline_root.id)
+            baseline_after = len(baseline_store.vector_search(str(sample["user_query"])))
+            audit = AuditLog()
+            revoked = MemoryRevoker(protected_store, audit).revoke_poisoned_memory(protected_root.id, "batch revocation test")
+            after = len(protected_store.vector_search(str(sample["user_query"])))
+            rows.append(
+                {
+                    "id": sample["id"],
+                    "label": "attack",
+                    "category": sample["category"],
+                    "input": sample["content"],
+                    "source": sample["source_uri"],
+                    "baseline": f"残留 {baseline_after} 条",
+                    "protected": f"撤销 {len(revoked)} 条，检索 {after} 条",
+                    "blockedStage": "D7 revocation",
+                    "elapsedMs": 0,
+                    "isError": after != 0,
+                    "baselineDetail": {
+                        "root_id": baseline_root.id,
+                        "derived_id": baseline_derived.id,
+                        "retrieval_after": baseline_after,
+                    },
+                    "protectedDetail": {
+                        "root_id": protected_root.id,
+                        "derived_id": protected_derived.id,
+                        "retrieval_before": before,
+                        "revoked_ids": revoked,
+                        "retrieval_after": after,
+                        "audit": real.serialize_audit(audit.events),
+                    },
+                }
+            )
+            progress(index, len(samples), str(sample["id"]))
+    finally:
+        baseline_store.close()
+        protected_store.close()
+
+    reference_rows = read_csv_rows(real.RESULTS / "type5" / "revocation.csv")
+    effective = sum(not row["isError"] for row in rows)
+    reference_effective = sum(str(row["effective"]).lower() == "true" for row in reference_rows)
+    cards = [
+        metric_card("撤销成功", f"{effective}/{len(rows)}", f"{reference_effective}/{len(reference_rows)}"),
+        metric_card("撤销节点", str(sum(len(row["protectedDetail"]["revoked_ids"]) for row in rows)), str(len(reference_rows) * 2)),
+        metric_card("撤销后命中", str(sum(row["protectedDetail"]["retrieval_after"] for row in rows)), "0"),
+        metric_card("无防护残留", str(sum(row["baselineDetail"]["retrieval_after"] for row in rows)), str(len(reference_rows))),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "revocation",
+        "title": "D7 级联撤销测试",
+        "sampleCount": len(rows),
+        "executionCount": len(rows) * 2,
+        "sourceLabel": "类型五攻击样本前20条及其派生记忆",
+        "referenceSource": "results/type5/revocation.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "MASW.d7_revocation.MemoryRevoker",
+            "SQLiteMemoryStore.parent_ids",
+            "MASW.memory_store.AuditLog",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
+BATCH_RUNNERS = {
+    "e2e": run_batch_e2e,
+    "type4": run_batch_type4,
+    "type5": run_batch_type5,
+    "revocation": run_batch_revocation,
+}
+
+BATCH_DATASETS = [
+    {"id": "e2e", "label": "端到端闭环（38条）", "samples": 38, "source": "build_e2e_cases"},
+    {"id": "type4", "label": "类型四困难集（118条）", "samples": 118, "source": "data/type4/hard_docs.jsonl"},
+    {"id": "type5", "label": "类型五困难集（136条）", "samples": 136, "source": "data/type5/hardset.jsonl"},
+    {"id": "revocation", "label": "级联撤销（20条）", "samples": 20, "source": "results/type5/revocation.csv"},
+]
+
+JOBS: dict[str, dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
+BATCH_RUN_LOCK = threading.Lock()
+
+
+def start_batch_job(dataset: str) -> str:
+    if dataset not in BATCH_RUNNERS:
+        raise ValueError(f"unknown batch dataset: {dataset}")
+    job_id = f"JOB-{uuid.uuid4().hex[:10]}"
+    total = next(item["samples"] for item in BATCH_DATASETS if item["id"] == dataset)
+    JOBS[job_id] = {"job_id": job_id, "dataset": dataset, "status": "queued", "completed": 0, "total": total, "current": "等待执行"}
+
+    def worker() -> None:
+        def report(completed: int, count: int, current: str) -> None:
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "running", "completed": completed, "total": count, "current": current})
+
+        try:
+            with BATCH_RUN_LOCK:
+                with JOBS_LOCK:
+                    JOBS[job_id]["status"] = "running"
+                result = BATCH_RUNNERS[dataset](report)
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "complete", "completed": total, "result": result, "current": "完成"})
+        except Exception as exc:
+            traceback.print_exc()
+            with JOBS_LOCK:
+                JOBS[job_id].update({"status": "error", "error": str(exc), "current": type(exc).__name__})
+
+    threading.Thread(target=worker, name=job_id, daemon=True).start()
+    return job_id
+
+
 RUNNERS = {
     "e2e": lambda: e2e_response(0, "e2e"),
     "type4": type4_response,
@@ -492,25 +925,45 @@ class DemoHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/api/health":
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/health":
             self.send_json(
                 200,
                 {
                     "ok": True,
                     "mode": "real-modules",
                     "scenarios": sorted(RUNNERS),
+                    "batch_datasets": [item["id"] for item in BATCH_DATASETS],
                 },
             )
+            return
+        if parsed.path == "/api/batch/datasets":
+            self.send_json(200, {"datasets": BATCH_DATASETS, "seed": real.SEED})
+            return
+        if parsed.path == "/api/batch/status":
+            job_id = parse_qs(parsed.query).get("job_id", [""])[0]
+            with JOBS_LOCK:
+                job = JOBS.get(job_id)
+                payload = dict(job) if job else None
+            if payload is None:
+                self.send_json(404, {"error": f"unknown job: {job_id}"})
+            else:
+                self.send_json(200, payload)
             return
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/run":
+        parsed = urlparse(self.path)
+        if parsed.path not in {"/api/run", "/api/batch/start"}:
             self.send_json(404, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             request = json.loads(self.rfile.read(length) or b"{}")
+            if parsed.path == "/api/batch/start":
+                job_id = start_batch_job(str(request.get("dataset", "")))
+                self.send_json(202, {"job_id": job_id, "status": "queued"})
+                return
             scenario = str(request.get("scenario", ""))
             runner = RUNNERS.get(scenario)
             if runner is None:
