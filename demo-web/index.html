@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentArmor 攻防演示台</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <h1>AgentArmor 攻防演示台</h1>
+            <p>本地演示沙箱 · 预置实验样本</p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <label class="scenario-control">
+            <span>演示场景</span>
+            <select id="scenarioSelect" aria-label="选择演示场景"></select>
+          </label>
+          <button id="resetButton" class="button button-secondary" type="button">重置</button>
+          <button id="nextButton" class="button button-primary" type="button">执行下一步</button>
+          <button id="autoButton" class="button button-secondary" type="button">自动播放</button>
+        </div>
+
+        <div class="run-state">
+          <span class="status-dot"></span>
+          <div>
+            <span id="executionMode">检查真实模块…</span>
+            <strong id="runId"></strong>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-stage">
+        <section class="scenario-summary" aria-live="polite">
+          <div>
+            <h2 id="scenarioTitle"></h2>
+            <p id="scenarioDescription"></p>
+          </div>
+          <div class="attack-input">
+            <span>本次输入</span>
+            <code id="scenarioInput"></code>
+          </div>
+        </section>
+
+        <section class="comparison" aria-label="无防护与 AgentArmor 对比">
+          <article class="lane lane-baseline">
+            <header class="lane-header">
+              <div>
+                <span class="lane-label">BASELINE</span>
+                <h3>无防护链路</h3>
+              </div>
+              <strong id="baselineResult" class="lane-result">等待执行</strong>
+            </header>
+            <ol id="baselineSteps" class="timeline"></ol>
+          </article>
+
+          <div class="versus" aria-hidden="true">VS</div>
+
+          <article class="lane lane-protected">
+            <header class="lane-header">
+              <div>
+                <span class="lane-label">PROTECTED</span>
+                <h3>AgentArmor 链路</h3>
+              </div>
+              <strong id="protectedResult" class="lane-result">等待执行</strong>
+            </header>
+            <ol id="protectedSteps" class="timeline"></ol>
+          </article>
+        </section>
+
+        <section class="evidence-panel">
+          <header class="evidence-header">
+            <nav class="tabs" aria-label="证据类型">
+              <button class="tab is-active" data-tab="memory" type="button">记忆数据库</button>
+              <button class="tab" data-tab="audit" type="button">审计日志</button>
+              <button class="tab" data-tab="details" type="button">场景证据</button>
+            </nav>
+            <div class="progress-copy">
+              <span id="stepCounter">0 / 5</span>
+              <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+            </div>
+          </header>
+          <div id="evidenceContent" class="evidence-content"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
