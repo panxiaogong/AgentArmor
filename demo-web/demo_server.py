@@ -31,6 +31,7 @@ SHARED_ROOT = REPO_ROOT / "multi_agent_shared_write_named"
 RUNTIME_ROOT = DEMO_ROOT / "runtime"
 
 sys.path.insert(0, str(SOURCE_PARENT))
+sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SHARED_ROOT))
 
 # The experiment runner imports the Unix-only ``resource`` module for one
@@ -54,6 +55,9 @@ from MASW.d7_revocation import MemoryRevoker  # noqa: E402
 from MASW.memory_store import AuditLog  # noqa: E402
 from MASW.types import MemoryRecord, MemoryScope, TrustLevel  # noqa: E402
 from experiments import run_real_experiments as real  # noqa: E402
+from AgentArmor.AutoWrite.tests import eval_autowrite as autowrite_eval  # noqa: E402
+from MINJA.tests import eval_minja as minja_eval  # noqa: E402
+from Reflection.tests import eval_reflection as reflection_eval  # noqa: E402
 
 
 def json_ready(value: Any) -> Any:
@@ -493,6 +497,24 @@ def metric_card(label: str, live: str, reference: str) -> dict[str, str]:
     }
 
 
+def classification_metrics(rows: list[Any]) -> dict[str, float | int]:
+    tp = sum(row.expected_label == "attack" and row.predicted_label == "attack" for row in rows)
+    fp = sum(row.expected_label == "benign" and row.predicted_label == "attack" for row in rows)
+    tn = sum(row.expected_label == "benign" and row.predicted_label == "benign" for row in rows)
+    fn = sum(row.expected_label == "attack" and row.predicted_label == "benign" for row in rows)
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    fpr = fp / (fp + tn) if fp + tn else 0.0
+    return {"tp": tp, "fp": fp, "tn": tn, "fn": fn, "precision": precision, "recall": recall, "f1": f1, "fpr": fpr}
+
+
+def verdict_text(label: str, predicted_attack: bool) -> str:
+    if label == "attack":
+        return "已阻断" if predicted_attack else "漏报"
+    return "误报" if predicted_attack else "正常放行"
+
+
 def save_batch_result(run_dir: Path, payload: dict[str, Any]) -> None:
     (run_dir / "batch_result.json").write_text(
         json.dumps(json_ready(payload), ensure_ascii=False, indent=2, default=str),
@@ -519,6 +541,7 @@ def run_batch_e2e(progress: Any) -> dict[str, Any]:
                     "id": case.id,
                     "label": case.label,
                     "category": case.category,
+                    "configuration": "BASELINE → PROTECTED",
                     "input": case.q_inject,
                     "targetQuery": case.q_target,
                     "source": case.source_uri,
@@ -572,6 +595,7 @@ def run_batch_e2e(progress: Any) -> dict[str, Any]:
         "dataset": "e2e",
         "title": "端到端记忆污染闭环",
         "sampleCount": len(cases),
+        "recordCount": len(rows),
         "executionCount": len(raw_rows),
         "sourceLabel": "build_e2e_cases：30条攻击 + 8条良性",
         "referenceSource": "results/e2e/summary.csv",
@@ -590,6 +614,207 @@ def run_batch_e2e(progress: Any) -> dict[str, Any]:
     return payload
 
 
+def run_batch_type1(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-type1")
+    samples = list(autowrite_eval.ALL_SAMPLES)
+    os.environ.setdefault("AUTOWRITE_CHAIN_KEY", "a" * 64)
+    evaluator = autowrite_eval.AutoWriteEvaluator(
+        "Config-5_Full",
+        autowrite_eval.make_ablation_configs("mock")["Config-5_Full"],
+        mode="mock",
+    )
+    evaluated = evaluator.evaluate(samples)
+    sample_by_id = {sample.id: sample for sample in samples}
+    rows: list[dict[str, Any]] = []
+    for index, result in enumerate(evaluated, start=1):
+        sample = sample_by_id[result.sample_id]
+        predicted_attack = result.predicted_label == "attack"
+        rows.append(
+            {
+                "id": result.sample_id,
+                "label": result.expected_label,
+                "category": result.subtype,
+                "configuration": result.config_name,
+                "input": sample.candidate_content,
+                "targetQuery": sample.target_query,
+                "source": f"AutoWrite/tests/data/autowrite_dataset.csv · {sample.source}",
+                "baseline": "无防御写入",
+                "protected": verdict_text(result.expected_label, predicted_attack),
+                "blockedStage": result.verdict_nodes,
+                "elapsedMs": result.latency_ms,
+                "isError": result.expected_label != result.predicted_label,
+                "baselineDetail": {"mode": "Config-1_Baseline", "expected": result.expected_label},
+                "protectedDetail": json_ready(result),
+            }
+        )
+        progress(index, len(evaluated), result.sample_id)
+
+    metrics = classification_metrics(evaluated)
+    cards = [
+        metric_card("Precision", f"{metrics['precision']:.3f}", "1.000"),
+        metric_card("Recall", f"{metrics['recall']:.3f}", "0.312"),
+        metric_card("F1", f"{metrics['f1']:.3f}", "0.476"),
+        metric_card("FPR", f"{metrics['fpr']:.3f}", "0.000"),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "type1",
+        "title": "类型一：AutoWrite 自动记忆写入",
+        "sampleCount": len(samples),
+        "recordCount": len(rows),
+        "executionCount": len(rows),
+        "sourceLabel": "autowrite_dataset.csv：80条攻击 + 40条良性",
+        "referenceSource": "results/type123/rerun_summary.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "AutoWriteEvaluator.evaluate(Config-5_Full)",
+            "D-A PreWriteSanitizer",
+            "D-B SelectiveWritePolicy",
+            "D-C/D-D/D-E/D-F",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
+def run_batch_type2(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-type2")
+    samples = list(minja_eval.ALL_SAMPLES)
+    embed_fn = minja_eval._make_mock_embed(dim=32)
+    pipeline = minja_eval.build_config5(embed_fn, None, "mock")
+    write_results = [
+        minja_eval.evaluate_sample(pipeline, sample, "Config-5", "mock")
+        for sample in samples
+    ]
+    retrieval_results, _ = minja_eval.evaluate_retrieval_path(
+        "Config-5", minja_eval.build_config5, embed_fn, None, "mock"
+    )
+    evaluated = [result for result in write_results if result.subtype != "MI-4"] + retrieval_results
+    sample_by_id = {sample.id: sample for sample in samples}
+    rows: list[dict[str, Any]] = []
+    for index, result in enumerate(evaluated, start=1):
+        sample = sample_by_id[result.sample_id]
+        predicted_attack = result.predicted_label == "attack"
+        path_type = "检索路径" if result.subtype == "MI-4" or result in retrieval_results else "写入路径"
+        rows.append(
+            {
+                "id": result.sample_id,
+                "label": result.expected_label,
+                "category": result.subtype,
+                "configuration": f"Config-5 · {path_type}",
+                "input": sample.candidate_content,
+                "targetQuery": sample.target_query,
+                "source": f"MINJA/tests/data/minja_dataset.csv · {sample.source}",
+                "baseline": "Config-1 无完整防御",
+                "protected": verdict_text(result.expected_label, predicted_attack),
+                "blockedStage": result.blocked_by or "none",
+                "elapsedMs": result.latency_ms,
+                "isError": result.expected_label != result.predicted_label,
+                "baselineDetail": {"mode": "Config-1", "path": path_type},
+                "protectedDetail": json_ready(result),
+            }
+        )
+        progress(min(index, len(samples)), len(samples), result.sample_id)
+
+    metrics = classification_metrics(evaluated)
+    cards = [
+        metric_card("Precision", f"{metrics['precision']:.3f}", "1.000"),
+        metric_card("Recall", f"{metrics['recall']:.3f}", "1.000"),
+        metric_card("F1", f"{metrics['f1']:.3f}", "1.000"),
+        metric_card("FPR", f"{metrics['fpr']:.3f}", "0.000"),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "type2",
+        "title": "类型二：MINJA 自主写入与检索",
+        "sampleCount": len(samples),
+        "recordCount": len(rows),
+        "executionCount": len(rows),
+        "sourceLabel": "minja_dataset.csv：120条样本 + 10条检索对照记录",
+        "referenceSource": "results/type123/rerun_summary.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "MINJADefensePipeline.on_write_request",
+            "evaluate_retrieval_path",
+            "D1-D6 Config-5",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
+def run_batch_type3(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("batch-type3")
+    samples = list(reflection_eval.ALL_SAMPLES)
+    scenarios = list(reflection_eval.RETRIEVAL_SCENARIOS)
+    pipeline = reflection_eval.ReflectionDefensePipeline.from_config(reflection_eval.build_config6())
+    evaluated = reflection_eval._evaluate_write_samples(pipeline, "Config-6", samples)
+    evaluated.extend(reflection_eval._evaluate_retrieval_scenarios(pipeline, "Config-6", scenarios))
+    sample_by_id = {sample.sample_id: sample for sample in samples}
+    scenario_by_id = {scenario.scenario_id: scenario for scenario in scenarios}
+    rows: list[dict[str, Any]] = []
+    for index, result in enumerate(evaluated, start=1):
+        sample = sample_by_id.get(result.sample_id)
+        scenario = scenario_by_id.get(result.sample_id)
+        content = sample.summary_candidate if sample else "\n".join((scenario.poison_facts if scenario else []))
+        source = f"Reflection/datasets/reflection_type3_seed.csv · {sample.source}" if sample else "Reflection retrieval synthetic scenario"
+        predicted_attack = result.predicted_label == "attack"
+        rows.append(
+            {
+                "id": result.sample_id,
+                "label": result.expected_label,
+                "category": result.subtype,
+                "configuration": f"Config-6 · {result.path_type}",
+                "input": content,
+                "targetQuery": scenario.query if scenario else "反思摘要写入",
+                "source": source,
+                "baseline": "Config-1 Unsafe",
+                "protected": verdict_text(result.expected_label, predicted_attack),
+                "blockedStage": result.decisive_node or "none",
+                "elapsedMs": result.latency_ms,
+                "isError": result.expected_label != result.predicted_label,
+                "baselineDetail": {"mode": "Config-1", "path": result.path_type},
+                "protectedDetail": json_ready(result),
+            }
+        )
+        progress(index, len(evaluated), result.sample_id)
+
+    metrics = classification_metrics(evaluated)
+    cards = [
+        metric_card("Precision", f"{metrics['precision']:.3f}", "0.815"),
+        metric_card("Recall", f"{metrics['recall']:.3f}", "1.000"),
+        metric_card("F1", f"{metrics['f1']:.3f}", "0.898"),
+        metric_card("FPR", f"{metrics['fpr']:.3f}", "0.250"),
+    ]
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "type3",
+        "title": "类型三：Reflection 反思记忆",
+        "sampleCount": len(samples) + len(scenarios),
+        "recordCount": len(rows),
+        "executionCount": len(rows),
+        "sourceLabel": "reflection_type3_seed.csv：40条 + 2组检索场景",
+        "referenceSource": "results/type123/rerun_summary.csv",
+        "cards": cards,
+        "rows": rows,
+        "moduleCalls": [
+            "ReflectionDefensePipeline.evaluate",
+            "ReflectionDefensePipeline.on_retrieval",
+            "D1-D5 + provenance + retrieval guard",
+        ],
+        "artifactDir": str(run_dir),
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
 def type4_pipeline_review(doc: dict[str, Any], pipeline: DefensePipeline) -> dict[str, Any]:
     result = pipeline.upload_document(Document(doc_id=str(doc["id"]), content=str(doc["text"]), source=str(doc["source"])))
     return {
@@ -598,15 +823,25 @@ def type4_pipeline_review(doc: dict[str, Any], pipeline: DefensePipeline) -> dic
     }
 
 
-def run_batch_type4(progress: Any) -> dict[str, Any]:
-    run_id, run_dir = fresh_run("batch-type4")
-    docs = real.make_type4_docs(hard=True)
+def run_batch_type4(progress: Any, hard: bool = True) -> dict[str, Any]:
+    suffix = "hard" if hard else "main"
+    run_id, run_dir = fresh_run(f"batch-type4-{suffix}")
+    docs = real.make_type4_docs(hard=hard)
     main_docs = real.make_type4_docs(hard=False)
     char_model = real.train_char_model([doc["text"] for doc in main_docs if doc["label"] == "benign"])
-    baseline_metrics, baseline_rows = real.evaluate_type4_method("KEYWORD_BASELINE", docs, char_model)
-    protected_metrics, protected_rows = real.evaluate_type4_method("AGENTARMOR_COMPLETE", docs, char_model)
-    baseline_by_id = {row["id"]: row for row in baseline_rows}
-    protected_by_id = {row["id"]: row for row in protected_rows}
+    methods = [
+        "KEYWORD_BASELINE",
+        "PERPLEXITY_BASELINE",
+        "AGENTARMOR_MINUS_HIDDEN_REGION",
+        "AGENTARMOR_MINUS_RETRIEVAL",
+        "AGENTARMOR_COMPLETE",
+    ]
+    metrics_by_method: dict[str, dict[str, Any]] = {}
+    rows_by_method: dict[str, dict[str, dict[str, Any]]] = {}
+    for method in methods:
+        method_metrics, method_rows = real.evaluate_type4_method(method, docs, char_model)
+        metrics_by_method[method] = method_metrics
+        rows_by_method[method] = {str(row["id"]): row for row in method_rows}
 
     def local_lm(context: str, target: str) -> float:
         text = f"{context} {target}".lower()
@@ -614,43 +849,42 @@ def run_batch_type4(progress: Any) -> dict[str, Any]:
         return 0.0001 if risky else 0.25
 
     pipeline = DefensePipeline(config=PipelineConfig.CONFIG_5_MAX, llm_model=local_lm)
-    rows: list[dict[str, Any]] = []
+    pipeline_reviews: dict[str, dict[str, Any]] = {}
     for index, doc in enumerate(docs, start=1):
-        baseline = baseline_by_id[str(doc["id"])]
-        protected = protected_by_id[str(doc["id"])]
-        pipeline_review = type4_pipeline_review(doc, pipeline)
-        is_attack = doc["label"] == "attack"
-        predicted = bool(protected["predicted_attack"])
-        if is_attack and predicted:
-            outcome = "已阻断"
-        elif is_attack:
-            outcome = "漏报"
-        elif predicted:
-            outcome = "误报"
-        else:
-            outcome = "正常放行"
-        rows.append(
-            {
-                "id": doc["id"],
-                "label": doc["label"],
-                "category": doc["category"],
-                "input": doc["text"],
-                "source": doc["source"],
-                "baseline": "检测为攻击" if baseline["predicted_attack"] else "未检出",
-                "protected": outcome,
-                "blockedStage": "Type4 detector" if predicted else "none",
-                "elapsedMs": round(float(protected["elapsed_ms"]), 6),
-                "score": round(float(protected["score"]), 3),
-                "isError": (is_attack and not predicted) or (not is_attack and predicted),
-                "baselineDetail": baseline,
-                "protectedDetail": protected,
-                "pipelineReview": pipeline_review,
-            }
-        )
+        pipeline_reviews[str(doc["id"])] = type4_pipeline_review(doc, pipeline)
         progress(index, len(docs), str(doc["id"]))
 
+    rows: list[dict[str, Any]] = []
+    for doc in docs:
+        is_attack = doc["label"] == "attack"
+        baseline = rows_by_method["KEYWORD_BASELINE"][str(doc["id"])]
+        for method in methods:
+            result = rows_by_method[method][str(doc["id"])]
+            predicted = bool(result["predicted_attack"])
+            rows.append(
+                {
+                    "id": doc["id"],
+                    "label": doc["label"],
+                    "category": doc["category"],
+                    "configuration": method,
+                    "input": doc["text"],
+                    "source": doc["source"],
+                    "baseline": "检测为攻击" if baseline["predicted_attack"] else "未检出",
+                    "protected": verdict_text(doc["label"], predicted),
+                    "blockedStage": ";".join(result.get("reasons", [])) if isinstance(result.get("reasons"), list) else (result.get("reasons") or "none"),
+                    "elapsedMs": round(float(result["elapsed_ms"]), 6),
+                    "score": round(float(result["score"]), 3),
+                    "isError": (is_attack and not predicted) or (not is_attack and predicted),
+                    "baselineDetail": baseline,
+                    "protectedDetail": result,
+                    "pipelineReview": pipeline_reviews[str(doc["id"])] if method == "AGENTARMOR_COMPLETE" else None,
+                }
+            )
+
+    protected_metrics = metrics_by_method["AGENTARMOR_COMPLETE"]
+    reference_file = "hardset.csv" if hard else "full_system_main.csv"
     reference = next(
-        item for item in read_csv_rows(real.RESULTS / "type4" / "hardset.csv")
+        item for item in read_csv_rows(real.RESULTS / "type4" / reference_file)
         if item["method"] == "AGENTARMOR_COMPLETE"
     )
     attack_total = sum(doc["label"] == "attack" for doc in docs)
@@ -664,18 +898,20 @@ def run_batch_type4(progress: Any) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
         "real_execution": True,
-        "dataset": "type4",
-        "title": "类型四：知识库污染困难集",
+        "dataset": f"type4_{suffix}",
+        "title": f"类型四：知识库污染{'困难集' if hard else '主测试集'}",
         "sampleCount": len(docs),
-        "executionCount": len(baseline_rows) + len(protected_rows) + len(docs),
-        "sourceLabel": "hard_docs.jsonl：54条攻击 + 64条良性",
-        "referenceSource": "results/type4/hardset.csv",
+        "recordCount": len(rows),
+        "executionCount": len(rows) + len(docs),
+        "sourceLabel": f"{'hard_docs' if hard else 'main_docs'}.jsonl：{attack_total}条攻击 + {benign_total}条良性；5种本地方法",
+        "referenceSource": f"results/type4/{reference_file}",
         "cards": cards,
         "rows": rows,
         "moduleCalls": [
             "experiments.evaluate_type4_method",
             "External_Developer_Write.DefensePipeline.upload_document",
             "SP2 ContentPerplexityAnalyzer",
+            "5种本地方法（远程LLM基线未混入）",
         ],
         "artifactDir": str(run_dir),
     }
@@ -687,44 +923,36 @@ def run_batch_type5(progress: Any) -> dict[str, Any]:
     run_id, run_dir = fresh_run("batch-type5")
     samples = real.build_type5_hard_samples()
     (run_dir / "type5").mkdir(parents=True, exist_ok=True)
-    no_defense = next(item for item in real.TYPE5_CONFIGS if item.name == "NO_DEFENSE")
-    complete = next(item for item in real.TYPE5_CONFIGS if item.name == "COMPLETE_AGENTARMOR")
     original_results = real.RESULTS
     rows: list[dict[str, Any]] = []
     protected_raw: list[dict[str, Any]] = []
     try:
         real.RESULTS = run_dir
         for index, sample in enumerate(samples, start=1):
-            baseline = real.simulate_type5_sample(no_defense, sample)
-            protected = real.simulate_type5_sample(complete, sample)
-            protected_raw.append(protected)
-            attack = sample["label"] == "attack"
-            predicted = bool(protected["predicted_attack"])
-            if attack and predicted:
-                outcome = "已阻断"
-            elif attack:
-                outcome = "漏报"
-            elif predicted:
-                outcome = "误报"
-            else:
-                outcome = "正常放行"
-            rows.append(
-                {
-                    "id": sample["id"],
-                    "label": sample["label"],
-                    "category": sample["category"],
-                    "input": sample["content"],
-                    "targetQuery": sample["user_query"],
-                    "source": sample["source_uri"],
-                    "baseline": "危险执行" if baseline["dangerous_execution"] else ("正常完成" if not attack else "未执行"),
-                    "protected": outcome,
-                    "blockedStage": protected["blocked_stage"],
-                    "elapsedMs": round(float(baseline["elapsed_ms"]) + float(protected["elapsed_ms"]), 4),
-                    "isError": (attack and not predicted) or (not attack and predicted),
-                    "baselineDetail": baseline,
-                    "protectedDetail": protected,
-                }
-            )
+            results = [real.simulate_type5_sample(config, sample) for config in real.TYPE5_CONFIGS]
+            baseline = results[0]
+            for result in results:
+                if result["config"] == "COMPLETE_AGENTARMOR":
+                    protected_raw.append(result)
+                predicted = bool(result["predicted_attack"])
+                rows.append(
+                    {
+                        "id": sample["id"],
+                        "label": sample["label"],
+                        "category": sample["category"],
+                        "configuration": result["config"],
+                        "input": sample["content"],
+                        "targetQuery": sample["user_query"],
+                        "source": sample["source_uri"],
+                        "baseline": "危险执行" if baseline["dangerous_execution"] else ("正常完成" if sample["label"] == "benign" else "未执行"),
+                        "protected": verdict_text(sample["label"], predicted),
+                        "blockedStage": result["blocked_stage"],
+                        "elapsedMs": round(float(result["elapsed_ms"]), 4),
+                        "isError": sample["label"] != ("attack" if predicted else "benign"),
+                        "baselineDetail": baseline,
+                        "protectedDetail": result,
+                    }
+                )
             progress(index, len(samples), str(sample["id"]))
     finally:
         real.RESULTS = original_results
@@ -736,8 +964,9 @@ def run_batch_type5(progress: Any) -> dict[str, Any]:
     )
     attack_total = sum(sample["label"] == "attack" for sample in samples)
     benign_total = len(samples) - attack_total
-    dangerous_count = sum(bool(row["protectedDetail"]["dangerous_execution"]) for row in rows if row["label"] == "attack")
-    benign_success = sum(bool(row["protectedDetail"]["benign_success"]) for row in rows if row["label"] == "benign")
+    complete_rows = [row for row in rows if row["configuration"] == "COMPLETE_AGENTARMOR"]
+    dangerous_count = sum(bool(row["protectedDetail"]["dangerous_execution"]) for row in complete_rows if row["label"] == "attack")
+    benign_success = sum(bool(row["protectedDetail"]["benign_success"]) for row in complete_rows if row["label"] == "benign")
     cards = [
         metric_card("检出 TP", f"{metrics['tp']}/{attack_total}", f"{reference['tp']}/{attack_total}"),
         metric_card("危险执行", f"{dangerous_count}/{attack_total}", f"0/{attack_total}"),
@@ -750,14 +979,14 @@ def run_batch_type5(progress: Any) -> dict[str, Any]:
         "dataset": "type5",
         "title": "类型五：多 Agent 共享记忆困难集",
         "sampleCount": len(samples),
-        "executionCount": len(samples) * 2,
-        "sourceLabel": "hardset.jsonl：72条攻击 + 64条良性",
+        "recordCount": len(rows),
+        "executionCount": len(rows),
+        "sourceLabel": "hardset.jsonl：72条攻击 + 64条良性；5种防御配置",
         "referenceSource": "results/type5/hardset_main.csv",
         "cards": cards,
         "rows": rows,
         "moduleCalls": [
-            "simulate_type5_sample(NO_DEFENSE)",
-            "simulate_type5_sample(COMPLETE_AGENTARMOR)",
+            "simulate_type5_sample × 5 configs",
             "MASW D1-D7",
             "SQLiteMemoryStore",
         ],
@@ -800,6 +1029,7 @@ def run_batch_revocation(progress: Any) -> dict[str, Any]:
                     "id": sample["id"],
                     "label": "attack",
                     "category": sample["category"],
+                    "configuration": "D7 级联撤销",
                     "input": sample["content"],
                     "source": sample["source_uri"],
                     "baseline": f"残留 {baseline_after} 条",
@@ -842,6 +1072,7 @@ def run_batch_revocation(progress: Any) -> dict[str, Any]:
         "dataset": "revocation",
         "title": "D7 级联撤销测试",
         "sampleCount": len(rows),
+        "recordCount": len(rows),
         "executionCount": len(rows) * 2,
         "sourceLabel": "类型五攻击样本前20条及其派生记忆",
         "referenceSource": "results/type5/revocation.csv",
@@ -858,18 +1089,87 @@ def run_batch_revocation(progress: Any) -> dict[str, Any]:
     return payload
 
 
+REPORT_COMPONENTS = [
+    ("e2e", 38, run_batch_e2e),
+    ("type1", 120, run_batch_type1),
+    ("type2", 120, run_batch_type2),
+    ("type3", 42, run_batch_type3),
+    ("type4_main", 164, partial(run_batch_type4, hard=False)),
+    ("type4_hard", 118, partial(run_batch_type4, hard=True)),
+    ("type5", 136, run_batch_type5),
+    ("revocation", 20, run_batch_revocation),
+]
+
+
+def run_report_full(progress: Any) -> dict[str, Any]:
+    run_id, run_dir = fresh_run("report-full")
+    total = sum(count for _, count, _ in REPORT_COMPONENTS)
+    offset = 0
+    component_results: list[dict[str, Any]] = []
+    for dataset_id, sample_count, runner in REPORT_COMPONENTS:
+        def component_progress(completed: int, _count: int, current: str, *, base: int = offset, name: str = dataset_id) -> None:
+            progress(base + min(completed, sample_count), total, f"{name} · {current}")
+
+        result = runner(component_progress)
+        for row in result["rows"]:
+            row["datasetGroup"] = dataset_id
+            row["datasetTitle"] = result["title"]
+        component_results.append(result)
+        offset += sample_count
+        progress(offset, total, f"{dataset_id} 完成")
+
+    rows = [row for result in component_results for row in result["rows"]]
+    execution_count = sum(int(result["executionCount"]) for result in component_results)
+    matched_cards = sum(card["delta"] == "一致" for result in component_results for card in result["cards"])
+    total_cards = sum(len(result["cards"]) for result in component_results)
+    payload = {
+        "run_id": run_id,
+        "real_execution": True,
+        "dataset": "report_full",
+        "title": "完整报告复现：类型一至五与闭环验证",
+        "sampleCount": total,
+        "uniqueSampleCount": total - 20,
+        "recordCount": len(rows),
+        "executionCount": execution_count,
+        "sourceLabel": "8组项目内测试入口；撤销20组由Type 5攻击样本派生",
+        "referenceSource": "document.tex 第9章及 results/ 全部对应结果",
+        "cards": [
+            metric_card("独立内容", str(total - 20), str(total - 20)),
+            metric_card("测试分组", str(total), str(total)),
+            metric_card("实际模块执行", str(execution_count), str(execution_count)),
+            metric_card("指标一致项", f"{matched_cards}/{total_cards}", f"{total_cards}/{total_cards}"),
+        ],
+        "rows": rows,
+        "moduleCalls": [call for result in component_results for call in result["moduleCalls"]],
+        "artifactDir": str(run_dir),
+        "componentArtifacts": [result["artifactDir"] for result in component_results],
+    }
+    save_batch_result(run_dir, payload)
+    return payload
+
+
 BATCH_RUNNERS = {
+    "report_full": run_report_full,
     "e2e": run_batch_e2e,
-    "type4": run_batch_type4,
+    "type1": run_batch_type1,
+    "type2": run_batch_type2,
+    "type3": run_batch_type3,
+    "type4_main": partial(run_batch_type4, hard=False),
+    "type4_hard": partial(run_batch_type4, hard=True),
     "type5": run_batch_type5,
     "revocation": run_batch_revocation,
 }
 
 BATCH_DATASETS = [
-    {"id": "e2e", "label": "端到端闭环（38条）", "samples": 38, "source": "build_e2e_cases"},
-    {"id": "type4", "label": "类型四困难集（118条）", "samples": 118, "source": "data/type4/hard_docs.jsonl"},
-    {"id": "type5", "label": "类型五困难集（136条）", "samples": 136, "source": "data/type5/hardset.jsonl"},
-    {"id": "revocation", "label": "级联撤销（20条）", "samples": 20, "source": "results/type5/revocation.csv"},
+    {"id": "report_full", "label": "完整报告复现（758组测试）", "samples": 758, "source": "项目报告全部本地测试入口"},
+    {"id": "e2e", "label": "端到端闭环（38条 / 76次）", "samples": 38, "source": "build_e2e_cases"},
+    {"id": "type1", "label": "类型一 AutoWrite（120条）", "samples": 120, "source": "AutoWrite/tests/data/autowrite_dataset.csv"},
+    {"id": "type2", "label": "类型二 MINJA（120条 + 检索）", "samples": 120, "source": "MINJA/tests/data/minja_dataset.csv"},
+    {"id": "type3", "label": "类型三 Reflection（40条 + 2场景）", "samples": 42, "source": "Reflection/datasets/reflection_type3_seed.csv"},
+    {"id": "type4_main", "label": "类型四主集（164条 × 5方法）", "samples": 164, "source": "data/type4/main_docs.jsonl"},
+    {"id": "type4_hard", "label": "类型四困难集（118条 × 5方法）", "samples": 118, "source": "data/type4/hard_docs.jsonl"},
+    {"id": "type5", "label": "类型五困难集（136条 × 5配置）", "samples": 136, "source": "data/type5/hardset.jsonl"},
+    {"id": "revocation", "label": "级联撤销（20组）", "samples": 20, "source": "results/type5/revocation.csv"},
 ]
 
 JOBS: dict[str, dict[str, Any]] = {}
@@ -988,8 +1288,9 @@ class DemoHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     RUNTIME_ROOT.mkdir(exist_ok=True)
     handler = partial(DemoHandler, directory=str(DEMO_ROOT))
-    server = ThreadingHTTPServer(("127.0.0.1", 4173), handler)
-    print("AgentArmor real-module demo: http://127.0.0.1:4173")
+    port = int(os.environ.get("AGENTARMOR_DEMO_PORT", "4173"))
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    print(f"AgentArmor real-module demo: http://127.0.0.1:{port}")
     server.serve_forever()
 
 

@@ -11,7 +11,7 @@
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
-          <div class="brand-mark">A</div>
+          <div class="brand-mark"><img src="./assets/agentarmor-logo.png" alt="AgentArmor 作品Logo" /></div>
           <div>
             <h1>AgentArmor 攻防演示台</h1>
             <p>本地演示沙箱 · 预置实验样本</p>
@@ -130,6 +130,12 @@
                 <span id="batchRowCount">0 条</span>
               </div>
               <div class="result-filters">
+                <select id="datasetGroupFilter" aria-label="按测试模块筛选">
+                  <option value="all">全部模块</option>
+                </select>
+                <select id="configurationFilter" aria-label="按测试配置筛选">
+                  <option value="all">全部配置</option>
+                </select>
                 <select id="labelFilter" aria-label="按标签筛选">
                   <option value="all">全部标签</option>
                   <option value="attack">攻击</option>
@@ -145,7 +151,7 @@
             </header>
             <div class="results-table-wrap">
               <table class="results-table">
-                <thead><tr><th>样本编号</th><th>标签</th><th>攻击类型</th><th>无防护</th><th>AgentArmor</th><th>阻断阶段</th><th>耗时</th></tr></thead>
+                <thead><tr><th>样本编号</th><th>标签</th><th>攻击类型</th><th>测试配置</th><th>判定结果</th><th>阻断阶段</th><th>耗时</th></tr></thead>
                 <tbody id="batchTableBody"><tr><td colspan="7" class="table-empty">请先运行一组真实测试</td></tr></tbody>
               </table>
             </div>

@@ -41,12 +41,11 @@ button, select { font: inherit; }
   place-items: center;
   width: 42px;
   height: 42px;
-  border: 2px solid var(--blue);
-  border-radius: 10px;
-  color: var(--blue);
-  font-weight: 800;
-  font-size: 22px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
 }
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .brand h1 { margin: 0 0 3px; font-size: 20px; }
 .brand p { margin: 0; color: var(--muted); font-size: 12px; }
 
@@ -205,8 +204,10 @@ select { min-width: 240px; padding: 0 34px 0 12px; }
 .results-toolbar strong { font-size: 14px; }
 .results-toolbar span { color: var(--muted); font-size: 11px; }
 .result-filters { display: flex; gap: 8px; }
-.result-filters select, .result-filters input { min-width: 0; width: 128px; height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: #0c1727; color: #e9f1fc; font-size: 11px; }
-.result-filters input { width: 168px; }
+.result-filters select, .result-filters input { min-width: 0; width: 108px; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #0c1727; color: #e9f1fc; font-size: 10px; }
+.result-filters select:first-child { width: 124px; }
+.result-filters select:nth-child(2) { width: 132px; }
+.result-filters input { width: 142px; }
 .results-table-wrap { min-height: 0; overflow: auto; }
 .results-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
 .results-table th { position: sticky; top: 0; z-index: 1; padding: 9px 8px; background: #0a1422; color: var(--muted); text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); }
@@ -239,6 +240,8 @@ select { min-width: 240px; padding: 0 34px 0 12px; }
 .detail-section:last-child { margin-bottom: 0; }
 .detail-section > strong { display: block; margin-bottom: 7px; color: #8fb1d8; font-size: 11px; letter-spacing: .06em; }
 .detail-section p, .detail-section pre { margin: 0; padding: 9px 10px; border: 1px solid #26354c; background: #0a1422; color: #d9e5f5; font: 11px/1.55 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-section .detail-explanation { border-left: 3px solid var(--blue); font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 12px; }
+.detail-section .detail-risk { border-left: 3px solid var(--amber); background: rgba(255,202,98,.055); font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 12px; }
 .detail-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .detail-fact { padding: 8px 9px; background: #0c1727; border: 1px solid #26354c; }
 .detail-fact span { display: block; color: var(--muted); font-size: 9px; }
