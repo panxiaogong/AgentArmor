@@ -40,3 +40,129 @@
 {"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
 {"event": "retrieval_checked", "query_preview": "What is the finance sync mailbox?", "returned": 1, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
 {"event": "retrieval_checked", "query_preview": "What is the user's official name?", "returned": 3, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
+{"event": "write_blocked", "elapsed_s": 0.002, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0018, "accepted": 0, "quarantined": 1, "rejected": 1, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 0, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0051, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 3, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 0, "quarantined": 3, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "retrieval_checked", "query_preview": "What is the finance sync mailbox?", "returned": 1, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
+{"event": "retrieval_checked", "query_preview": "What is the user's official name?", "returned": 3, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
+{"event": "write_blocked", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 0, "quarantined": 1, "rejected": 1, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 0, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0006, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 0, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 0, "quarantined": 3, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0006, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0006, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.001, "accepted": 1, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0008, "accepted": 0, "quarantined": 3, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "retrieval_checked", "query_preview": "What is the finance sync mailbox?", "returned": 1, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
+{"event": "retrieval_checked", "query_preview": "What is the user's official name?", "returned": 3, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 1, "rejected": 1, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 2, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_blocked", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 0, "rejected": 1, "blocked_by": "D1", "nodes_run": ["D1"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0006, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0001, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0002, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 0, "quarantined": 3, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 2, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0003, "accepted": 0, "quarantined": 1, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 0, "quarantined": 3, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0005, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "write_completed", "elapsed_s": 0.0004, "accepted": 1, "quarantined": 0, "rejected": 0, "blocked_by": null, "nodes_run": ["D1", "D2", "D3", "D4", "D5"]}
+{"event": "retrieval_checked", "query_preview": "What is the finance sync mailbox?", "returned": 1, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}
+{"event": "retrieval_checked", "query_preview": "What is the user's official name?", "returned": 3, "tampered": 0, "flagged": 1, "nodes_run": ["R1"]}

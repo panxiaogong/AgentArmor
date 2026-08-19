@@ -59,6 +59,10 @@
             <span>本次输入</span>
             <code id="scenarioInput"></code>
           </div>
+          <div class="scenario-explainer">
+            <div><span>中文释义</span><p id="scenarioTranslation"></p></div>
+            <div><span>可能影响</span><p id="scenarioRisk"></p></div>
+          </div>
         </section>
 
         <section class="comparison" aria-label="无防护与 AgentArmor 对比">
@@ -86,6 +90,17 @@
             <ol id="protectedSteps" class="timeline"></ol>
           </article>
         </section>
+
+        <div
+          id="panelResizer"
+          class="panel-resizer"
+          role="separator"
+          aria-label="调整攻防链路与证据区域高度"
+          aria-orientation="horizontal"
+          aria-valuemin="120"
+          aria-valuenow="220"
+          tabindex="0"
+        ></div>
 
         <section class="evidence-panel">
           <header class="evidence-header">
